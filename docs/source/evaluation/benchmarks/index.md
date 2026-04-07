@@ -11,6 +11,7 @@ Standardized evaluation suites for measuring research quality.
 |-----------|-----------------|--------------|---------------|
 | [FreshQA](./freshqa.md) | Factual accuracy on current knowledge | 600 questions | Shallow, Full pipeline |
 | [Deep Research Bench](./deep-research-bench.md) | Report quality (RACE + FACT metrics) | 100 topics | Deep researcher |
+| [DeepResearch Bench II](./deep-research-bench-ii.md) | Rubric-based evaluation of information recall, analysis, and presentation | 132 tasks | Deep researcher |
 | [DeepSearchQA](./deepsearch-qa.md) | Document QA across categories | 900 problems | Deep researcher |
 
 ```{toctree}
@@ -18,5 +19,6 @@ Standardized evaluation suites for measuring research quality.
 
 freshqa.md
 deep-research-bench.md
+deep-research-bench-ii.md
 deepsearch-qa.md
 ```

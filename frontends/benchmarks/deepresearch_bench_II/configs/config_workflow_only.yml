@@ -1,0 +1,71 @@
+# DeepResearch Bench II: run the deep research workflow only and save the
+# generated report for each task. This starter config mirrors the current
+# max-quality preset on this branch. Edit llms and tools to match your stack.
+
+general:
+  telemetry:
+    logging:
+      console:
+        _type: console
+        level: INFO
+  use_uvloop: true
+
+llms:
+  nemotron_ultra_llm:
+    _type: nim
+    model_name: nvidia/llama-3.1-nemotron-ultra-253b-v1
+    base_url: "https://integrate.api.nvidia.com/v1"
+    temperature: 0.3
+    top_p: 0.9
+    max_tokens: 128000
+    num_retries: 5
+    timeout: 600
+    chat_template_kwargs:
+      enable_thinking: true
+
+  openai_gpt_5_4:
+    _type: openai
+    model_name: "gpt-5.4"
+    api_key: ${OPENAI_API_KEY}
+    api_type: responses
+    reasoning_effort: xhigh
+
+functions:
+  paper_search_tool:
+    _type: paper_search
+    max_results: 5
+    serper_api_key: ${SERPER_API_KEY}
+
+  advanced_web_search_tool:
+    _type: tavily_web_search
+    max_results: 2
+    advanced_search: true
+
+  deep_research_agent:
+    _type: deep_research_agent
+    orchestrator_llm: openai_gpt_5_4
+    researcher_llm: nemotron_ultra_llm
+    planner_llm: openai_gpt_5_4
+    max_loops: 2
+    verbose: true
+    tools:
+      - paper_search_tool
+      - advanced_web_search_tool
+
+workflow:
+  _type: deep_research_workflow
+
+eval:
+  general:
+    workflow_alias: "aiq-drb2-custom-stack"
+    output_dir: frontends/benchmarks/deepresearch_bench_II/results/run_1
+    max_concurrency: 4
+    dataset:
+      _type: jsonl
+      file_path: frontends/benchmarks/deepresearch_bench_II/data/tasks_and_rubrics.jsonl
+      structure:
+        question_key: prompt
+        answer_key: content
+        generated_answer_key: generated_answer
+
+  evaluators: {}

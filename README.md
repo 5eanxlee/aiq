@@ -312,6 +312,7 @@ The `frontends/benchmarks/` directory contains evaluation pipelines for assessin
 | Benchmark | Description | Location |
 |-----------|-------------|----------|
 | Deep Research Bench | RACE and FACT evaluation for research quality | `frontends/benchmarks/deepresearch_bench/` |
+| DeepResearch Bench II | Rubric-based evaluation of information recall, analysis, and presentation | `frontends/benchmarks/deepresearch_bench_II/` |
 | FreshQA | Factuality evaluation on time-sensitive questions | `frontends/benchmarks/freshqa/` |
 
 ### Running Evaluations
@@ -354,6 +355,7 @@ phoenix serve
 
 For detailed benchmark documentation, refer to:
 - [Deep Research Bench README](frontends/benchmarks/deepresearch_bench/README.md)
+- [DeepResearch Bench II README](frontends/benchmarks/deepresearch_bench_II/README.md)
 - [FreshQA README](frontends/benchmarks/freshqa/README.md)
 
 ## Development
