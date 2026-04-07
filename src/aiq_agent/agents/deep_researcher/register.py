@@ -22,6 +22,7 @@ from pydantic import Field
 
 from aiq_agent.common import LLMProvider
 from aiq_agent.common import LLMRole
+from aiq_agent.common import RuntimeLLMTrackerCallback
 from aiq_agent.common import VerboseTraceCallback
 from aiq_agent.common import _create_chat_response
 from aiq_agent.common import filter_tools_by_sources
@@ -71,7 +72,9 @@ async def deep_research_agent(config: DeepResearchAgentConfig, builder: Builder)
         provider.configure(LLMRole.PLANNER, planner_llm)
 
     verbose = is_verbose(config.verbose)
-    callbacks = [VerboseTraceCallback()] if verbose else []
+    callbacks = [RuntimeLLMTrackerCallback("deep_research_agent")]
+    if verbose:
+        callbacks.append(VerboseTraceCallback())
 
     agent = DeepResearcherAgent(
         llm_provider=provider,

@@ -19,7 +19,7 @@
 
 'use client'
 
-import { type FC, useState, useEffect, useRef } from 'react'
+import { type FC, useState } from 'react'
 import { Banner } from '@/adapters/ui'
 import { useLayoutStore } from '@/features/layout/store'
 import { useDocumentsStore } from '@/features/documents'
@@ -36,47 +36,33 @@ interface NoSourcesBannerProps {
   isAuthenticated?: boolean
 }
 
-export const NoSourcesBanner: FC<NoSourcesBannerProps> = ({ isAuthenticated = false }) => {
+const DismissibleNoSourcesBanner: FC = () => {
   const [isDismissedByUser, setIsDismissedByUser] = useState(false)
 
+  if (isDismissedByUser) return null
+
+  return (
+    <div className="mx-auto w-full max-w-3xl px-4">
+      <Banner status="warning" kind="inline" onClose={() => setIsDismissedByUser(true)}>
+        {WARNING_MESSAGE}
+      </Banner>
+    </div>
+  )
+}
+
+export const NoSourcesBanner: FC<NoSourcesBannerProps> = ({ isAuthenticated = false }) => {
   const enabledDataSourceIds = useLayoutStore((state) => state.enabledDataSourceIds)
   const sessionId = useChatStore((state) => state.currentConversation?.id)
 
   // Get completed files for the current session from the documents store
   const hasAvailableFiles = useDocumentsStore((state) =>
-    state.trackedFiles.some(
-      (f) => f.collectionName === sessionId && f.status === 'success'
-    )
+    state.trackedFiles.some((f) => f.collectionName === sessionId && f.status === 'success')
   )
 
   const hasAnySources = enabledDataSourceIds.length > 0
   const shouldShow = !hasAnySources && !hasAvailableFiles
 
-  // Track previous shouldShow to detect when conditions improve.
-  // When the warning condition clears (sources/files become available),
-  // reset the dismiss state so the banner can reappear if conditions worsen again.
-  const prevShouldShowRef = useRef(shouldShow)
+  if (!isAuthenticated || !shouldShow) return null
 
-  useEffect(() => {
-    const prev = prevShouldShowRef.current
-    // Conditions improved: was showing (or would show) -> now resolved
-    if (prev && !shouldShow) {
-      setIsDismissedByUser(false)
-    }
-    prevShouldShowRef.current = shouldShow
-  }, [shouldShow])
-
-  const handleDismiss = () => {
-    setIsDismissedByUser(true)
-  }
-
-  if (!isAuthenticated || !shouldShow || isDismissedByUser) return null
-
-  return (
-    <div className="mx-auto w-full max-w-3xl px-4">
-      <Banner status="warning" kind="inline" onClose={handleDismiss}>
-        {WARNING_MESSAGE}
-      </Banner>
-    </div>
-  )
+  return <DismissibleNoSourcesBanner key={sessionId ?? 'default-session'} />
 }

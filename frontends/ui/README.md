@@ -24,7 +24,7 @@ The AI-Q Blueprint UI provides an accessible, feature-rich frontend for the AI-Q
 ### 1. Install Dependencies
 
 ```bash
-npm install
+npm ci
 ```
 
 ### 2. Configure Environment
@@ -49,17 +49,18 @@ FILE_EXPIRATION_CHECK_INTERVAL_HOURS=24
 
 See `.env.example` for the full list of available frontend variables including authentication and file upload configuration.
 
-
 ### 3. Start Servers
 
 #### Running the Services
 
 **Start e2e** (from monorepo root)
+
 ```bash
 cd ../../
 ./scripts/start_e2e.sh
 ```
->**NOTE:** For UI development it may be more useful to use `./scripts/start_server_in_debug_mode.sh` with `npm run dev` in separate terminals.
+
+> **NOTE:** For UI development it may be more useful to use `./scripts/start_server_in_debug_mode.sh` with `npm run dev` in separate terminals.
 
 #### Separate terminal env setup
 
@@ -146,6 +147,7 @@ The AI-Q UI uses localStorage to persist chat sessions across page refreshes. To
 Sessions are stored with optimized data to minimize storage usage:
 
 **Stored (Essential for UI):**
+
 - Session metadata (id, title, timestamps)
 - Message content and timestamps
 - Thinking steps (for ChatThinking display)
@@ -153,6 +155,7 @@ Sessions are stored with optimized data to minimize storage usage:
 - Job IDs for deep research restoration
 
 **Not Stored (Fetched from backend on demand):**
+
 - Report content (loaded via API)
 - Citations, tasks, tool calls (replayed from SSE stream)
 - Agent traces and file artifacts
@@ -169,10 +172,10 @@ When creating a new session, if storage exceeds 4MB:
 ### Manual Cleanup
 
 To manually clear sessions:
+
 1. Open SessionsPanel (left sidebar)
 2. Click "Delete All Sessions" button
 3. Or delete individual sessions one at a time
-
 
 ### How Research Data Loading Works
 
@@ -183,8 +186,6 @@ When you reopen a session after a page refresh:
 3. **Report/Tasks/Citations tabs** - Shows loading spinner, then fetches data from backend
 
 The lazy loading is automatic and seamless - you don't need to do anything special.
-
-
 
 ## Docker Deployment
 
@@ -241,7 +242,7 @@ services:
       - OAUTH_CLIENT_SECRET=${OAUTH_CLIENT_SECRET}
       - OAUTH_ISSUER=${OAUTH_ISSUER}
     ports:
-      - "3000:3000"
+      - '3000:3000'
     depends_on:
       - backend
 ```
@@ -286,28 +287,28 @@ All environment variables are **runtime configurable** - no container rebuild ne
 
 ### Backend
 
-| Variable | Default | Description |
-|----------|---------|-------------|
+| Variable      | Default                 | Description     |
+| ------------- | ----------------------- | --------------- |
 | `BACKEND_URL` | `http://localhost:8000` | Backend API URL |
 
 ### Authentication
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `REQUIRE_AUTH` | `false` | Set to `true` to require OAuth login |
-| `NEXTAUTH_SECRET` | - | Session encryption secret (required if auth enabled) |
-| `NEXTAUTH_URL` | - | Public URL where app is hosted (required if auth enabled) |
-| `SESSION_MAX_AGE_HOURS` | `24` | Session and idToken cookie lifetime in hours |
-| `TOKEN_REFRESH_BUFFER_MINUTES` | `5` | Minutes before token expiry to trigger refresh (set to 30 for long-running jobs) |
+| Variable                       | Default | Description                                                                      |
+| ------------------------------ | ------- | -------------------------------------------------------------------------------- |
+| `REQUIRE_AUTH`                 | `false` | Set to `true` to require OAuth login                                             |
+| `NEXTAUTH_SECRET`              | -       | Session encryption secret (required if auth enabled)                             |
+| `NEXTAUTH_URL`                 | -       | Public URL where app is hosted (required if auth enabled)                        |
+| `SESSION_MAX_AGE_HOURS`        | `24`    | Session and idToken cookie lifetime in hours                                     |
+| `TOKEN_REFRESH_BUFFER_MINUTES` | `5`     | Minutes before token expiry to trigger refresh (set to 30 for long-running jobs) |
 
 > **Cookie Security:** `NEXTAUTH_URL` determines cookie security:
+>
 > - `http://...` -> non-secure cookies (local dev over HTTP)
 > - `https://...` -> secure cookies (production over HTTPS)
 
 ### OAuth (required when `REQUIRE_AUTH=true`)
 
 Provider-specific env vars depend on your provider implementation. See `src/adapters/auth/providers/auth-example.ts` for a template/checklist and the [Authentication](#authentication) section for setup steps.
-
 
 ## API Communication
 
@@ -379,8 +380,8 @@ Every auth provider must conform to the `AuthProviderConfig` interface defined i
 
 ```typescript
 interface AuthProviderConfig {
-  provider: Record<string, unknown> | null  // NextAuth-compatible provider object, or null
-  providerId: string                        // ID used in signIn(providerId) -- must match provider.id
+  provider: Record<string, unknown> | null // NextAuth-compatible provider object, or null
+  providerId: string // ID used in signIn(providerId) -- must match provider.id
   refreshToken: (refreshToken: string) => Promise<TokenRefreshResult>
 }
 
@@ -497,7 +498,6 @@ const MyComponent = () => {
 
 When auth is disabled, `useAuth()` returns `isAuthenticated: true` with a default user -- no sign-in flow is triggered.
 
-
 ## Development
 
 ### Adding a New Feature
@@ -527,7 +527,6 @@ import { useSession } from '@/adapters/auth'
 import { Button } from '@nvidia/foundations-react-core'
 import { signIn } from 'next-auth/react'
 ```
-
 
 ## Styling
 
@@ -575,9 +574,8 @@ Test utilities are in `src/test-utils/` and MSW mock handlers/database are in `s
 ### Backend connection fails
 
 1. Verify backend is running: `curl http://localhost:8000/docs`
-2. Check `BACKEND_URL` in `.env.local`
+2. Check `BACKEND_URL` in `deploy/.env` or the UI runtime environment
 3. Check browser console for CORS errors
-
 
 ### Port already in use
 

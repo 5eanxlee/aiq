@@ -101,7 +101,7 @@ functions:
     # Summarization options (optional, all backends):
     # generate_summary: true                  # Generate one-sentence summary per document
     # summary_model: nemotron_nano_llm             # LLM reference from llms: section (required if generate_summary is true)
-    # summary_db: sqlite+aiosqlite:///./summaries.db  # Summary storage (SQLite or PostgreSQL)
+    # summary_db: sqlite+aiosqlite:///./var/summaries.db  # Summary storage (SQLite or PostgreSQL)
 
     # Backend-specific options (each backend uses different fields):
     chroma_dir: /tmp/chroma_data              # llamaindex only
@@ -197,7 +197,7 @@ functions:
     _type: knowledge_retrieval
     generate_summary: true
     summary_model: summary_llm     # Required: LLM reference from llms: section
-    summary_db: ${AIQ_SUMMARY_DB:-sqlite+aiosqlite:///./summaries.db}
+    summary_db: ${AIQ_SUMMARY_DB:-sqlite+aiosqlite:///./var/summaries.db}
 ```
 
 When `generate_summary: true`, you **must** configure `summary_model` to reference an LLM from the `llms:` section. For production deployments, use PostgreSQL for `summary_db` instead of SQLite.

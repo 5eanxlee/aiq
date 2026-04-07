@@ -15,11 +15,9 @@
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { isAuthRequired } from '@/adapters/auth/config'
+import { resolveBackendUrl } from '@/adapters/api/backend-url'
 
-const getBackendUrl = (): string => {
-  const url = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
-  return url.replace(/\/$/, '')
-}
+const getBackendUrl = (req: Request): string => resolveBackendUrl(req.headers.get('x-aiq-backend-url'))
 
 export async function POST(req: Request): Promise<Response> {
   try {
@@ -37,11 +35,7 @@ export async function POST(req: Request): Promise<Response> {
     const idToken = authRequired ? cookieStore.get('idToken')?.value : null
 
     // Build the backend URL
-    const backendUrl = `${getBackendUrl()}/chat/stream`
-
-    console.log('[Chat API] Proxying request to:', backendUrl)
-    console.log('[Chat API] Auth required:', authRequired)
-    console.log('[Chat API] idToken cookie present:', !!idToken)
+    const backendUrl = `${getBackendUrl(req)}/chat/stream`
 
     // Forward the request to the backend with cookies
     const response = await fetch(backendUrl, {
@@ -54,8 +48,6 @@ export async function POST(req: Request): Promise<Response> {
       },
       body: JSON.stringify(body),
     })
-
-    console.log('[Chat API] Backend response status:', response.status)
 
     // Handle error responses
     if (!response.ok) {

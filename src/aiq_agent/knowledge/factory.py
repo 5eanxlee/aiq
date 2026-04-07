@@ -284,7 +284,7 @@ def clear_active_ingestor() -> None:
 _summary_store: "SummaryStore | None" = None
 
 # Default DB URL (used if configure_summary_db not called)
-_DEFAULT_SUMMARY_DB = "sqlite+aiosqlite:///./summaries.db"
+_DEFAULT_SUMMARY_DB = "sqlite+aiosqlite:///./var/summaries.db"
 
 
 def configure_summary_db(db_url: str) -> None:

@@ -15,10 +15,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef } from 'react'
-import {
-  checkBackendHealthCached,
-  invalidateHealthCache,
-} from '@/shared/hooks/use-backend-health'
+import { checkBackendHealthCached, invalidateHealthCache } from '@/shared/hooks/use-backend-health'
 import { useChatStore, selectHasConnectionError } from '../store'
 
 const INITIAL_DELAY_MS = 5_000
@@ -33,33 +30,33 @@ const BACKOFF_FACTOR = 2
  */
 export function useConnectionRecovery(onRecovered: () => void): void {
   const hasConnectionError = useChatStore(selectHasConnectionError)
-  const dismissConnectionErrors = useChatStore(
-    (s) => s.dismissConnectionErrors
-  )
+  const dismissConnectionErrors = useChatStore((s) => s.dismissConnectionErrors)
 
   const timerRef = useRef<ReturnType<typeof setTimeout>>()
   const delayRef = useRef(INITIAL_DELAY_MS)
   const activeRef = useRef(false)
 
-  const checkHealth = useCallback(async () => {
-    invalidateHealthCache()
-    const healthy = await checkBackendHealthCached()
+  const checkHealth = useCallback(
+    async function runHealthCheck() {
+      invalidateHealthCache()
+      const healthy = await checkBackendHealthCached()
 
-    if (!activeRef.current) return
+      if (!activeRef.current) return
 
-    if (healthy) {
-      activeRef.current = false
-      dismissConnectionErrors()
-      onRecovered()
-      return
-    }
+      if (healthy) {
+        activeRef.current = false
+        dismissConnectionErrors()
+        onRecovered()
+        return
+      }
 
-    delayRef.current = Math.min(
-      delayRef.current * BACKOFF_FACTOR,
-      MAX_DELAY_MS
-    )
-    timerRef.current = setTimeout(checkHealth, delayRef.current)
-  }, [dismissConnectionErrors, onRecovered])
+      delayRef.current = Math.min(delayRef.current * BACKOFF_FACTOR, MAX_DELAY_MS)
+      timerRef.current = setTimeout(() => {
+        void runHealthCheck()
+      }, delayRef.current)
+    },
+    [dismissConnectionErrors, onRecovered]
+  )
 
   // Activate / deactivate polling based on connection error presence
   useEffect(() => {
@@ -72,7 +69,9 @@ export function useConnectionRecovery(onRecovered: () => void): void {
 
     activeRef.current = true
     delayRef.current = INITIAL_DELAY_MS
-    timerRef.current = setTimeout(checkHealth, delayRef.current)
+    timerRef.current = setTimeout(() => {
+      void checkHealth()
+    }, delayRef.current)
 
     return () => {
       activeRef.current = false
@@ -86,12 +85,12 @@ export function useConnectionRecovery(onRecovered: () => void): void {
 
     const onOnline = () => {
       delayRef.current = INITIAL_DELAY_MS
-      checkHealth()
+      void checkHealth()
     }
 
     const onVisible = () => {
       if (document.visibilityState === 'visible') {
-        checkHealth()
+        void checkHealth()
       }
     }
 

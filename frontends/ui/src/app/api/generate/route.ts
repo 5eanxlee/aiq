@@ -21,11 +21,9 @@
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { isAuthRequired } from '@/adapters/auth/config'
+import { resolveBackendUrl } from '@/adapters/api/backend-url'
 
-const getBackendUrl = (): string => {
-  const url = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
-  return url.replace(/\/$/, '')
-}
+const getBackendUrl = (req: Request): string => resolveBackendUrl(req.headers.get('x-aiq-backend-url'))
 
 export async function POST(req: Request): Promise<Response> {
   try {
@@ -43,11 +41,7 @@ export async function POST(req: Request): Promise<Response> {
     const idToken = authRequired ? cookieStore.get('idToken')?.value : null
 
     // Build the backend URL for /generate/stream
-    const backendUrl = `${getBackendUrl()}/generate/stream`
-
-    console.log('[Generate API] Proxying request to:', backendUrl)
-    console.log('[Generate API] Auth required:', authRequired)
-    console.log('[Generate API] idToken cookie present:', !!idToken)
+    const backendUrl = `${getBackendUrl(req)}/generate/stream`
 
     // Forward the request to the backend with cookies
     const response = await fetch(backendUrl, {
@@ -60,8 +54,6 @@ export async function POST(req: Request): Promise<Response> {
       },
       body: JSON.stringify(body),
     })
-
-    console.log('[Generate API] Backend response status:', response.status)
 
     // Handle error responses
     if (!response.ok) {

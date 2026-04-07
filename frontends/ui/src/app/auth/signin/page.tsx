@@ -56,7 +56,7 @@ const SignInContent = (): ReactNode => {
 
     const errorMessages: Record<string, string> = {
       OAuthSignin:
-        'OAuth configuration error. Check that OAUTH_CLIENT_ID is set in .env.local',
+        'OAuth configuration error. Check that OAUTH_CLIENT_ID is set in the UI runtime environment.',
       OAuthCallback: 'OAuth callback error. The authentication response was invalid.',
       OAuthCreateAccount: 'Could not create user account.',
       EmailCreateAccount: 'Could not create user account.',

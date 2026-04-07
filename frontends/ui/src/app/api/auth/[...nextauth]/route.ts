@@ -11,7 +11,7 @@
  * - POST /api/auth/callback/oauth
  *
  * After successful OAuth callback, sets the idToken as a cookie for backend auth.
- * This is necessary because middleware skips /api/auth/ routes.
+ * This is necessary because proxy.ts skips /api/auth/ routes.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -38,7 +38,7 @@ const clearAuthCookies = (response: NextResponse): void => {
 
 /**
  * Wrapper that sets idToken cookie after successful auth callback.
- * The middleware skips /api/auth/ routes, so we need to set the cookie here.
+ * proxy.ts skips /api/auth/ routes, so we need to set the cookie here.
  *
  * Handles both:
  * - OAuth callbacks (GET /api/auth/callback/oauth)
@@ -78,8 +78,6 @@ const withIdTokenCookie = async (
       })
 
       if (token?.idToken) {
-        console.log('[NextAuth] Setting idToken cookie after callback')
-
         // Clone the response to modify headers
         const newResponse = new NextResponse(response.body, {
           status: response.status,

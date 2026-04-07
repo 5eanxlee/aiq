@@ -21,10 +21,7 @@ vi.mock('@/shared/hooks/use-backend-health', () => ({
   invalidateHealthCache: vi.fn(),
 }))
 
-import {
-  checkBackendHealthCached,
-  invalidateHealthCache,
-} from '@/shared/hooks/use-backend-health'
+import { checkBackendHealthCached, invalidateHealthCache } from '@/shared/hooks/use-backend-health'
 
 const mockCheckHealth = checkBackendHealthCached as ReturnType<typeof vi.fn>
 const mockInvalidateCache = invalidateHealthCache as ReturnType<typeof vi.fn>
@@ -54,9 +51,7 @@ vi.mock('../store', () => {
     ),
     selectHasConnectionError: (state: any) =>
       state.currentConversation?.messages.some(
-        (m: any) =>
-          m.messageType === 'error' &&
-          m.errorData?.errorCode?.startsWith('connection.')
+        (m: any) => m.messageType === 'error' && m.errorData?.errorCode?.startsWith('connection.')
       ) ?? false,
     __setHasError: (val: boolean) => {
       hasError = val
@@ -65,8 +60,7 @@ vi.mock('../store', () => {
   }
 })
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const storeMock = await import('../store') as any
+const storeMock = (await import('../store')) as any
 
 import { useConnectionRecovery } from './use-connection-recovery'
 

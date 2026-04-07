@@ -67,6 +67,8 @@ fi
 # Suppress Python warnings unless overridden by .env
 export PYTHONWARNINGS="${PYTHONWARNINGS:-ignore}"
 
+mkdir -p "$REPO_ROOT/var"
+
 # Validate that config has front_end (API mode) - required for server/debug mode
 if ! grep -q "front_end:" "$REPO_ROOT/$CONFIG_FILE" 2>/dev/null; then
     echo ""

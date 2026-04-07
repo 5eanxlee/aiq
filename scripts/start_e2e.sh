@@ -91,6 +91,7 @@ check_env() {
 
     # Suppress Python warnings unless overridden by .env
     export PYTHONWARNINGS="${PYTHONWARNINGS:-ignore}"
+    mkdir -p "$PROJECT_ROOT/var"
 
     # For local E2E, backend always runs on localhost:8000
     export BACKEND_URL="http://localhost:8000"

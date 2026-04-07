@@ -40,8 +40,10 @@ logger = logging.getLogger(__name__)
 
 # Minimum character count for a report to be considered substantive.
 # Used by both _extract_report_content (to decide if write_file fallback is needed)
-# and _is_report_complete (to reject too-short reports).
-_MIN_REPORT_LENGTH = 1500
+# and _is_report_complete (to reject too-short reports). Kept well below the
+# orchestrator's word-count target so it remains a general floor rather than a
+# prompt-specific contract.
+_MIN_REPORT_LENGTH = 5000
 
 # Path to this agent's directory (for loading prompts)
 AGENT_DIR = Path(__file__).parent

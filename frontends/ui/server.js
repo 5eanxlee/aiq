@@ -62,6 +62,11 @@ const nextProxy = httpProxy.createProxyServer({
   preserveHeaderKeyCase: true,
 })
 
+// Keep Next.js route handlers aligned with the gateway-selected backend URL.
+nextProxy.on('proxyReq', (proxyReq) => {
+  proxyReq.setHeader('x-aiq-backend-url', BACKEND_HTTP_URL)
+})
+
 // Create proxy for backend
 const backendProxy = httpProxy.createProxyServer({
   changeOrigin: true,

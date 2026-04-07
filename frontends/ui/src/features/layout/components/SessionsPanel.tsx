@@ -10,7 +10,15 @@
 
 'use client'
 
-import { type FC, type KeyboardEvent, useCallback, useMemo, useState, useRef, useEffect } from 'react'
+import {
+  type FC,
+  type KeyboardEvent,
+  useCallback,
+  useMemo,
+  useState,
+  useRef,
+  useEffect,
+} from 'react'
 import { Flex, Text, Button, SidePanel } from '@/adapters/ui'
 import { Chat, Edit, Trash, Plus, Search, LoadingSpinner } from '@/adapters/ui/icons'
 import { useLayoutStore } from '../store'
@@ -71,13 +79,10 @@ export const SessionsPanel: FC<SessionsPanelProps> = ({
   const [deleteAllModalOpen, setDeleteAllModalOpen] = useState(false)
   const [sessionToDelete, setSessionToDelete] = useState<string | null>(null)
 
-  // Storage usage percentage — refreshes only when the panel opens
-  const [storagePercent, setStoragePercent] = useState<number>(0)
-  useEffect(() => {
-    if (isSessionsPanelOpen) {
-      const { percentUsed } = checkStorageHealth()
-      setStoragePercent(Math.round(percentUsed))
-    }
+  // Storage usage percentage — refreshes when the panel opens.
+  const storagePercent = useMemo(() => {
+    if (!isSessionsPanelOpen) return 0
+    return Math.round(checkStorageHealth().percentUsed)
   }, [isSessionsPanelOpen])
 
   // Check if any session has active operations
@@ -170,8 +175,12 @@ export const SessionsPanel: FC<SessionsPanelProps> = ({
           color="danger"
           onClick={handleDeleteAllClick}
           disabled={anySessionBusy}
-          aria-label={anySessionBusy ? "Delete all sessions (disabled)" : "Delete all sessions"}
-          title={anySessionBusy ? "Cannot delete while operations are in progress" : "Delete all sessions"}
+          aria-label={anySessionBusy ? 'Delete all sessions (disabled)' : 'Delete all sessions'}
+          title={
+            anySessionBusy
+              ? 'Cannot delete while operations are in progress'
+              : 'Delete all sessions'
+          }
         >
           <Flex align="center" gap="1">
             <Trash className="h-4 w-4" />
@@ -209,7 +218,7 @@ export const SessionsPanel: FC<SessionsPanelProps> = ({
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Search sessions..."
-          className="bg-surface-base border-base text-primary placeholder:text-subtle h-9 w-full rounded-md border pl-8 pr-3 text-sm outline-none focus:border-accent-primary"
+          className="bg-surface-base border-base text-primary placeholder:text-subtle focus:border-accent-primary h-9 w-full rounded-md border pl-8 pr-3 text-sm outline-none"
           aria-label="Search sessions"
         />
       </div>
@@ -371,17 +380,19 @@ const SessionItem: FC<SessionItemProps> = ({
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       className={`
-        group flex h-10 w-full items-center gap-2 rounded-md
-        border p-2 text-left transition-colors
-        outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand
+        focus-visible:ring-brand group flex h-10 w-full items-center gap-2
+        rounded-md border p-2 text-left
+        outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset
         ${isBusy ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}
         ${
           isSelected
-            ? 'bg-surface-raised border border-accent-primary'
+            ? 'bg-surface-raised border-accent-primary border'
             : 'border-base hover:bg-surface-raised-50 bg-transparent'
         }
       `}
-      aria-label={isBusy ? `Session: ${session.title} (processing in progress)` : `Session: ${session.title}`}
+      aria-label={
+        isBusy ? `Session: ${session.title} (processing in progress)` : `Session: ${session.title}`
+      }
       aria-disabled={isBusy}
     >
       {isEditing ? (
@@ -404,7 +415,7 @@ const SessionItem: FC<SessionItemProps> = ({
           {/* Loading indicator for active deep research */}
           {session.hasActiveDeepResearch && (
             <LoadingSpinner
-              className="shrink-0 text-accent-primary"
+              className="text-accent-primary shrink-0"
               aria-label="Deep research in progress"
             />
           )}
@@ -421,8 +432,14 @@ const SessionItem: FC<SessionItemProps> = ({
                 size="tiny"
                 onClick={handleEditClick}
                 disabled={isBusy || isSessionActive}
-                aria-label={isBusy || isSessionActive ? "Rename session (disabled)" : "Rename session"}
-                title={isBusy || isSessionActive ? "Cannot rename while operations are in progress" : "Rename session"}
+                aria-label={
+                  isBusy || isSessionActive ? 'Rename session (disabled)' : 'Rename session'
+                }
+                title={
+                  isBusy || isSessionActive
+                    ? 'Cannot rename while operations are in progress'
+                    : 'Rename session'
+                }
               >
                 <Edit height={16} width={16} />
               </Button>
@@ -432,8 +449,14 @@ const SessionItem: FC<SessionItemProps> = ({
                 color="danger"
                 onClick={handleDeleteClick}
                 disabled={isBusy || isSessionActive}
-                aria-label={isBusy || isSessionActive ? "Delete session (disabled)" : "Delete session"}
-                title={isBusy || isSessionActive ? "Cannot delete while operations are in progress" : "Delete session"}
+                aria-label={
+                  isBusy || isSessionActive ? 'Delete session (disabled)' : 'Delete session'
+                }
+                title={
+                  isBusy || isSessionActive
+                    ? 'Cannot delete while operations are in progress'
+                    : 'Delete session'
+                }
               >
                 <Trash height={16} width={16} />
               </Button>

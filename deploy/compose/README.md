@@ -71,7 +71,8 @@ Choose one database configuration in `deploy/.env`:
   `sqlite+aiosqlite:///./data/jobs.db`.
 - Set `AIQ_CHECKPOINT_DB` to
   `/app/data/checkpoints.db`.
-- Leave `AIQ_SUMMARY_DB` unset (defaults to `sqlite+aiosqlite:///./summaries.db`).
+- Set `AIQ_SUMMARY_DB` to
+  `sqlite+aiosqlite:///./data/summaries.db`.
 - You can keep the `postgres` service running or remove the `depends_on` block
   for `aiq-agent` if you want a SQLite-only setup.
 

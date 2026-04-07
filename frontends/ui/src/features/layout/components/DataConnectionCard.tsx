@@ -76,7 +76,7 @@ export const DataConnectionCard: FC<DataConnectionCardProps> = ({
       onClick={handleCardClick}
       onKeyDown={handleCardKeyDown}
       className={`border-base rounded-lg border p-3 transition-colors ${
-        isDisabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:bg-surface-raised-50'
+        isDisabled ? 'cursor-not-allowed opacity-50' : 'hover:bg-surface-raised-50 cursor-pointer'
       }`}
       aria-pressed={isEnabled}
       aria-disabled={isDisabled}
@@ -108,14 +108,17 @@ export const DataConnectionCard: FC<DataConnectionCardProps> = ({
           </Text>
         </Flex>
       </Flex>
-      {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
       <div className="ml-3 flex-shrink-0" onClick={handleSwitchClick}>
         <Switch
           size="small"
           checked={isEnabled && isAvailable}
           onCheckedChange={handleToggle}
           disabled={isDisabled}
-          aria-label={isDisabled ? `${source.name} (disabled)` : `${isEnabled ? 'Disable' : 'Enable'} ${source.name}`}
+          aria-label={
+            isDisabled
+              ? `${source.name} (disabled)`
+              : `${isEnabled ? 'Disable' : 'Enable'} ${source.name}`
+          }
         />
       </div>
     </Flex>

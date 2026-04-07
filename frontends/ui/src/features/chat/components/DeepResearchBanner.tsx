@@ -15,6 +15,7 @@
 
 import { type FC, useCallback } from 'react'
 import { Banner, Button, Flex, Text } from '@/adapters/ui'
+import { formatDuration } from '@/shared/utils/format-duration'
 import { formatTime } from '@/shared/utils/format-time'
 import { useLayoutStore } from '@/features/layout/store'
 import { useChatStore } from '../store'
@@ -30,6 +31,8 @@ export interface DeepResearchBannerProps {
   totalTokens?: number
   /** Number of tool calls (for success banner) */
   toolCallCount?: number
+  /** Total runtime for the job in milliseconds */
+  durationMs?: number
   /** Timestamp of the status update (Date or ISO string from persisted state) */
   timestamp?: Date | string
 }
@@ -59,9 +62,11 @@ const formatTokens = (count: number): string => {
 const getBannerConfig = (
   bannerType: DeepResearchBannerType,
   jobId: string,
-  stats?: { totalTokens?: number; toolCallCount?: number }
+  stats?: { totalTokens?: number; toolCallCount?: number; durationMs?: number }
 ): BannerConfig => {
   const jobIdLine = `Job ID: ${jobId}\n`
+  const durationText =
+    typeof stats?.durationMs === 'number' ? ` · ${formatDuration(stats.durationMs)}` : ''
 
   switch (bannerType) {
     case 'success': {
@@ -77,7 +82,7 @@ const getBannerConfig = (
 
       return {
         heading: `Report Completed!${statsText}`,
-        subheading: `Research has finished and a report is ready to view in the research panel. (${jobIdLine})`,
+        subheading: `Research has finished and a report is ready to view in the research panel${durationText}. (${jobIdLine})`,
         buttonText: 'View Report',
         buttonTab: 'report',
         status: 'success',
@@ -86,7 +91,7 @@ const getBannerConfig = (
     case 'failure':
       return {
         heading: 'Report Failed to Complete',
-        subheading: `Something prevented the research report from completing. Check the thinking for details. (${jobIdLine})`,
+        subheading: `Something prevented the research report from completing${durationText}. Check the thinking for details. (${jobIdLine})`,
         buttonText: 'View Thinking',
         buttonTab: 'thinking',
         status: 'error',
@@ -94,7 +99,7 @@ const getBannerConfig = (
     case 'cancelled':
       return {
         heading: 'Research Cancelled',
-        subheading: `Research was stopped by user. You can view any partial progress in the research panel. (${jobIdLine})`,
+        subheading: `Research was stopped by user${durationText}. You can view any partial progress in the research panel. (${jobIdLine})`,
         buttonText: 'View Progress',
         buttonTab: 'tasks',
         status: 'warning',
@@ -118,6 +123,7 @@ export const DeepResearchBanner: FC<DeepResearchBannerProps> = ({
   jobId,
   totalTokens,
   toolCallCount,
+  durationMs,
   timestamp,
 }) => {
   const { openRightPanel, setResearchPanelTab } = useLayoutStore()
@@ -125,7 +131,7 @@ export const DeepResearchBanner: FC<DeepResearchBannerProps> = ({
   const deepResearchStreamLoaded = useChatStore((state) => state.deepResearchStreamLoaded)
   const isDeepResearchStreaming = useChatStore((state) => state.isDeepResearchStreaming)
   const { loadReport, importStreamOnly, isLoading: isStreamLoading } = useLoadJobData()
-  const config = getBannerConfig(bannerType, jobId, { totalTokens, toolCallCount })
+  const config = getBannerConfig(bannerType, jobId, { totalTokens, toolCallCount, durationMs })
 
   // Tabs that require full stream data (tasks, thinking, citations)
   const tabRequiresStream = ['tasks', 'thinking', 'citations'].includes(config.buttonTab)

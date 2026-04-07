@@ -18,14 +18,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { isAuthRequired } from '@/adapters/auth/config'
+import { resolveBackendUrl } from '@/adapters/api/backend-url'
 
-const getBackendUrl = (): string => {
-  const url = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
-  return url.replace(/\/$/, '')
-}
+const getBackendUrl = (req: NextRequest): string =>
+  resolveBackendUrl(req.headers.get('x-aiq-backend-url'))
 
-const buildBackendUrl = (path: string[]): string => {
-  const backendBase = getBackendUrl()
+const buildBackendUrl = (req: NextRequest, path: string[]): string => {
+  const backendBase = getBackendUrl(req)
   const pathString = path.join('/')
   return `${backendBase}/v1/${pathString}`
 }
@@ -52,7 +51,7 @@ export async function GET(
 ): Promise<Response> {
   try {
     const { path } = await params
-    const backendUrl = buildBackendUrl(path)
+    const backendUrl = buildBackendUrl(req, path)
     const authHeaders = await getAuthHeaders(req)
 
     const response = await fetch(backendUrl, {
@@ -90,7 +89,7 @@ export async function POST(
 ): Promise<Response> {
   try {
     const { path } = await params
-    const backendUrl = buildBackendUrl(path)
+    const backendUrl = buildBackendUrl(req, path)
     const authHeaders = await getAuthHeaders(req)
     const contentType = req.headers.get('Content-Type') || 'application/json'
 
@@ -144,7 +143,7 @@ export async function DELETE(
 ): Promise<Response> {
   try {
     const { path } = await params
-    const backendUrl = buildBackendUrl(path)
+    const backendUrl = buildBackendUrl(req, path)
     const authHeaders = await getAuthHeaders(req)
 
     let body: string | undefined

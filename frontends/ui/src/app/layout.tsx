@@ -17,7 +17,12 @@ import { connection } from 'next/server'
 import { Providers } from './providers'
 import type { AppConfig } from '@/shared/context'
 import { getFileUploadConfigFromEnv } from '@/shared/config/file-upload'
-import { isAuthRequired, AUTH_PROVIDER_ID, TOKEN_REFRESH_BUFFER_SECONDS } from '@/adapters/auth/config'
+import {
+  isAuthRequired,
+  AUTH_PROVIDER_ID,
+  TOKEN_REFRESH_BUFFER_SECONDS,
+} from '@/adapters/auth/config'
+import { SvgIconLoader } from '@/shared/components/SvgIconLoader'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -49,14 +54,8 @@ const RootLayout = async ({ children }: RootLayoutProps): Promise<ReactNode> => 
 
   return (
     <html lang="en" id="style-root" suppressHydrationWarning>
-      <head>
-        {/* CDN SVG icon loader - inlines <svg data-src="..."> elements */}
-        <script
-          src="https://unpkg.com/external-svg-loader@1.6.8/svg-loader.min.js"
-          async
-        />
-      </head>
       <body className="bg-surface-base">
+        <SvgIconLoader />
         <Providers config={config}>{children}</Providers>
       </body>
     </html>

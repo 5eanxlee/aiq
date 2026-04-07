@@ -3,16 +3,19 @@
 
 import React from 'react'
 import { Document, Page, Text, View, StyleSheet, Font, Link } from '@react-pdf/renderer'
-import { marked } from 'marked'
+import { marked, type Token as MarkedToken, type Tokens } from 'marked'
 
-type Token = ReturnType<typeof marked.lexer>[number]
-type HeadingToken = Extract<Token, { type: 'heading' }>
-type ParagraphToken = Extract<Token, { type: 'paragraph' }>
-type ListToken = Extract<Token, { type: 'list' }>
-type TableToken = Extract<Token, { type: 'table' }>
-type CodeToken = Extract<Token, { type: 'code' }>
-type BlockquoteToken = Extract<Token, { type: 'blockquote' }>
-type HtmlToken = Extract<Token, { type: 'html' }>
+type Token = MarkedToken
+type HeadingToken = Tokens.Heading
+type ParagraphToken = Tokens.Paragraph
+type ListToken = Tokens.List
+type TableToken = Tokens.Table
+type CodeToken = Tokens.Code
+type BlockquoteToken = Tokens.Blockquote
+type HtmlToken = Tokens.HTML | Tokens.Tag
+type ListItemToken = Tokens.ListItem
+type TableCell = Tokens.TableCell
+type TableRow = Tokens.Table['rows'][number]
 
 Font.register({
   family: 'Helvetica',
@@ -205,15 +208,19 @@ function renderParagraph(token: ParagraphToken, index: number): React.ReactNode 
   )
 }
 
+function isListToken(token: Token): token is ListToken {
+  return token.type === 'list' && Array.isArray((token as Partial<ListToken>).items)
+}
+
 function renderList(token: ListToken, index: number, _nested: boolean = false): React.ReactNode {
-  return token.items.map((item: any, itemIndex: number) => {
+  return token.items.map((item: ListItemToken, itemIndex: number) => {
     const bullet = token.ordered ? `${itemIndex + 1}.` : '•'
     const textTokens: Token[] = []
-    const nestedLists: Token[] = []
+    const nestedLists: ListToken[] = []
 
     if (item.tokens?.length) {
       item.tokens.forEach((t: Token) => {
-        if (t.type === 'list') {
+        if (isListToken(t)) {
           nestedLists.push(t)
         } else {
           textTokens.push(t)
@@ -223,11 +230,11 @@ function renderList(token: ListToken, index: number, _nested: boolean = false): 
 
     const mainText = textTokens.length
       ? textTokens
-          .map((t: any) => {
-            if ('text' in t) {
+          .map((t) => {
+            if ('text' in t && typeof t.text === 'string') {
               return stripHtml(preserveHtmlLinks(t.text as string))
             }
-            if ('raw' in t) {
+            if ('raw' in t && typeof t.raw === 'string') {
               return stripHtml(preserveHtmlLinks(t.raw as string))
             }
             return ''
@@ -246,9 +253,7 @@ function renderList(token: ListToken, index: number, _nested: boolean = false): 
         <Text style={styles.listItemBullet}>{bullet}</Text>
         <View style={styles.listItemText}>
           <Text>{parseInlineFormatting(mainText)}</Text>
-          {nestedLists.map((nestedList: any, nlIndex: number) =>
-            renderList(nestedList as ListToken, nlIndex, true)
-          )}
+          {nestedLists.map((nestedList, nlIndex: number) => renderList(nestedList, nlIndex, true))}
         </View>
       </View>
     )
@@ -275,7 +280,7 @@ function renderTable(token: TableToken, index: number): React.ReactNode {
   return (
     <View key={index} style={styles.table} wrap={!isSmallTable}>
       <View style={styles.tableHeaderRow} wrap={false}>
-        {token.header.map((cell: any, cellIndex: number) => {
+        {token.header.map((cell: TableCell, cellIndex: number) => {
           const isLast = cellIndex === token.header.length - 1
           return (
             <View key={cellIndex} style={isLast ? styles.tableCellLast : styles.tableCell}>
@@ -285,9 +290,9 @@ function renderTable(token: TableToken, index: number): React.ReactNode {
         })}
       </View>
 
-      {token.rows.map((row: any[], rowIndex: number) => (
+      {token.rows.map((row: TableRow, rowIndex: number) => (
         <View key={rowIndex} style={styles.tableRow} wrap={false}>
-          {row.map((cell: any, cellIndex: number) => {
+          {row.map((cell: TableCell, cellIndex: number) => {
             const isLast = cellIndex === row.length - 1
             return (
               <View key={cellIndex} style={isLast ? styles.tableCellLast : styles.tableCell}>

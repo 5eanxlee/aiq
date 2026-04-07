@@ -49,6 +49,7 @@ dev = [
     "pytest-cov>=4.1.0",
     "pytest-env>=1.1.0",
     "pre-commit>=3.5.0",
+    "nbconvert>=7.16.6",
     "ruff~=0.12",
     "yapf>=0.40.0",
     "mypy>=1.5.0",
@@ -71,7 +72,7 @@ viz = [
 # -----------------------------------------------------------------------------
 # Workspace members are installed via: uv sync
 # Individual packages: uv pip install -e ./frontends/cli
-# See [tool.uv.workspace] below for auto-discovered packages
+# See [tool.uv.workspace] below for the explicit workspace member list
 # -----------------------------------------------------------------------------
 
 [project.entry-points."nat.plugins"]
@@ -157,7 +158,8 @@ indent_dictionary_value = true
 
 # -----------------------------------------------------------------------------
 # uv Workspace Configuration
-# Auto-discovers packages in sources/ and frontends/ directories
+# Explicit package entries keep workspace resolution stable even when ignored
+# filesystem entries like .DS_Store appear under sources/
 #
 # Usage:
 #   uv sync                              # Install root + all workspace members
@@ -172,6 +174,7 @@ dev = [
     "pytest-cov>=4.1.0",
     "pytest-env>=1.1.0",
     "pre-commit>=3.5.0",
+    "nbconvert>=7.16.6",
     "ruff~=0.12",
     "yapf>=0.40.0",
     "mypy>=1.5.0",
@@ -189,6 +192,7 @@ dev = [
 prerelease = "if-necessary-or-explicit"
 override-dependencies = [
     "authlib>=1.6.9",
+    "chardet<6",
     "tornado>=6.5.5",
     "pyopenssl>=26.0.0",
 ]
@@ -198,7 +202,9 @@ prerelease = "if-necessary-or-explicit"
 
 [tool.uv.workspace]
 members = [
-    "sources/*",
+    "sources/google_scholar_paper_search",
+    "sources/knowledge_layer",
+    "sources/tavily_web_search",
     "frontends/aiq_api",
     "frontends/cli",
     "frontends/debug",

@@ -168,7 +168,7 @@ workflow:
   _type: chat_deepresearcher_agent
   enable_escalation: true
   enable_clarifier: true
-  checkpoint_db: ${AIQ_CHECKPOINT_DB:-./checkpoints.db}
+  checkpoint_db: ${AIQ_CHECKPOINT_DB:-./var/checkpoints.db}
 ```
 
 ## Required Environment Variables

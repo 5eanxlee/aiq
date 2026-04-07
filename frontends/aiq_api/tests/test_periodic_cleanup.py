@@ -273,7 +273,7 @@ class TestCleanupOldEventsLoop:
         with patch("aiq_api.routes.jobs._run_event_cleanup", side_effect=mock_run):
             task = asyncio.create_task(
                 _cleanup_old_events_loop(
-                    db_url="sqlite+aiosqlite:///test.db",
+                    db_url="sqlite+aiosqlite:///./var/test.db",
                     retention_seconds=3600,
                     interval_seconds=9999,  # long interval — shouldn't matter if startup run works
                 )
@@ -308,7 +308,7 @@ class TestCleanupOldEventsLoop:
         with patch("aiq_api.routes.jobs._run_event_cleanup", side_effect=mock_run):
             task = asyncio.create_task(
                 _cleanup_old_events_loop(
-                    db_url="sqlite+aiosqlite:///test.db",
+                    db_url="sqlite+aiosqlite:///./var/test.db",
                     retention_seconds=3600,
                     interval_seconds=0,
                 )
@@ -346,7 +346,7 @@ class TestStartPeriodicCleanup:
                 _start_periodic_cleanup(
                     job_store=mock_job_store,
                     scheduler_address="tcp://localhost:8786",
-                    db_url="sqlite:///test.db",
+                    db_url="sqlite:///./var/test.db",
                     expiry_seconds=3600,
                     log_level=20,
                     use_threads=False,
@@ -355,7 +355,7 @@ class TestStartPeriodicCleanup:
         mock_job_store.dask_client.submit.assert_called_once()
         call_kwargs = mock_job_store.dask_client.submit.call_args[1]
         assert call_kwargs["scheduler_address"] == "tcp://localhost:8786"
-        assert call_kwargs["db_url"] == "sqlite:///test.db"
+        assert call_kwargs["db_url"] == "sqlite:///./var/test.db"
         assert call_kwargs["sleep_time_sec"] == 1800  # 3600 // 2
         mock_faf.assert_called_once_with(mock_future)
 
@@ -371,7 +371,7 @@ class TestStartPeriodicCleanup:
                 _start_periodic_cleanup(
                     job_store=mock_job_store,
                     scheduler_address="tcp://localhost:8786",
-                    db_url="sqlite:///test.db",
+                    db_url="sqlite:///./var/test.db",
                     expiry_seconds=7200,
                     log_level=20,
                     use_threads=False,
@@ -391,7 +391,7 @@ class TestStartPeriodicCleanup:
                 _start_periodic_cleanup(
                     job_store=mock_job_store,
                     scheduler_address="tcp://localhost:8786",
-                    db_url="sqlite:///test.db",
+                    db_url="sqlite:///./var/test.db",
                     expiry_seconds=604800,  # 7 days
                     log_level=20,
                     use_threads=False,
@@ -412,7 +412,7 @@ class TestStartPeriodicCleanup:
                 _start_periodic_cleanup(
                     job_store=mock_job_store,
                     scheduler_address="tcp://localhost:8786",
-                    db_url="sqlite:///test.db",
+                    db_url="sqlite:///./var/test.db",
                     expiry_seconds=60,
                     log_level=20,
                     use_threads=False,
@@ -432,7 +432,7 @@ class TestStartPeriodicCleanup:
             _start_periodic_cleanup(
                 job_store=mock_job_store,
                 scheduler_address="tcp://localhost:8786",
-                db_url="sqlite:///test.db",
+                db_url="sqlite:///./var/test.db",
                 expiry_seconds=3600,
                 log_level=20,
                 use_threads=False,

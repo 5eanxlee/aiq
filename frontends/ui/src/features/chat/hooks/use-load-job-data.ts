@@ -188,16 +188,18 @@ export const useLoadJobData = (): UseLoadJobDataReturn => {
         if (stateResponse.has_state && stateResponse.artifacts) {
           const { tools, outputs } = stateResponse.artifacts
 
-          tools?.forEach((tool: { name: string; input?: Record<string, unknown>; output?: string }) => {
-            const toolCallId = addDeepResearchToolCall({
-              name: tool.name,
-              input: tool.input,
-              workflow: undefined,
-            })
-            if (tool.output) {
-              completeDeepResearchToolCall(toolCallId, tool.output)
+          tools?.forEach(
+            (tool: { name: string; input?: Record<string, unknown>; output?: string }) => {
+              const toolCallId = addDeepResearchToolCall({
+                name: tool.name,
+                input: tool.input,
+                workflow: undefined,
+              })
+              if (tool.output) {
+                completeDeepResearchToolCall(toolCallId, tool.output)
+              }
             }
-          })
+          )
 
           outputs?.forEach((output: { type: string; content: string }) => {
             if (output.type === 'report' || output.type === 'output') {
@@ -223,7 +225,11 @@ export const useLoadJobData = (): UseLoadJobDataReturn => {
         loadJobState(jobId),
       ])
 
-      if (reportResult.status === 'fulfilled' && reportResult.value.has_report && reportResult.value.report) {
+      if (
+        reportResult.status === 'fulfilled' &&
+        reportResult.value.has_report &&
+        reportResult.value.report
+      ) {
         setReportContent(reportResult.value.report)
       }
     },
@@ -247,11 +253,29 @@ export const useLoadJobData = (): UseLoadJobDataReturn => {
         // Accumulation buffer — everything stays here until the stream ends
         const buffer = {
           agents: new Map<string, { name: string; input?: string; output?: string }>(),
-          llmSteps: new Map<string, { name: string; workflow?: string; content: string; thinking?: string; usage?: { input_tokens: number; output_tokens: number } }>(),
-          toolCalls: new Map<string, { name: string; input?: Record<string, unknown>; output?: string; workflow?: string; agentId?: string }>(),
+          llmSteps: new Map<
+            string,
+            {
+              name: string
+              workflow?: string
+              content: string
+              thinking?: string
+              usage?: { input_tokens: number; output_tokens: number }
+            }
+          >(),
+          toolCalls: new Map<
+            string,
+            {
+              name: string
+              input?: Record<string, unknown>
+              output?: string
+              workflow?: string
+              agentId?: string
+            }
+          >(),
           todos: null as TodoItem[] | null,
           citations: [] as Array<{ url: string; content: string; isCited: boolean }>,
-          files: new Map<string, string>(),  // filename -> latest content (deduped)
+          files: new Map<string, string>(), // filename -> latest content (deduped)
           reportContent: null as string | null,
         }
 
@@ -361,7 +385,11 @@ export const useLoadJobData = (): UseLoadJobDataReturn => {
               if (!buffer.agents.has(agentId)) {
                 buffer.agents.set(agentId, {
                   name,
-                  input: input ? (typeof input === 'string' ? input : JSON.stringify(input)) : undefined,
+                  input: input
+                    ? typeof input === 'string'
+                      ? input
+                      : JSON.stringify(input)
+                    : undefined,
                 })
               }
             },
@@ -370,7 +398,11 @@ export const useLoadJobData = (): UseLoadJobDataReturn => {
               if (!agentId) return
               const agent = buffer.agents.get(agentId)
               if (agent) {
-                agent.output = output ? (typeof output === 'string' ? output : JSON.stringify(output)) : undefined
+                agent.output = output
+                  ? typeof output === 'string'
+                    ? output
+                    : JSON.stringify(output)
+                  : undefined
               }
             },
 
@@ -489,8 +521,7 @@ export const useLoadJobData = (): UseLoadJobDataReturn => {
 
       // For stream requests, also check if stream is already loaded
       const hasStreamData =
-        currentState.deepResearchJobId === jobId &&
-        currentState.deepResearchStreamLoaded
+        currentState.deepResearchJobId === jobId && currentState.deepResearchStreamLoaded
 
       // If we have what we need, just open the panel
       if (hasReportData && (!shouldStreamFull || hasStreamData)) {
@@ -506,11 +537,7 @@ export const useLoadJobData = (): UseLoadJobDataReturn => {
         const statusResponse = await getJobStatus(jobId, idToken || undefined)
         const jobStatus = statusResponse.status
 
-        if (
-          jobStatus !== 'success' &&
-          jobStatus !== 'failure' &&
-          jobStatus !== 'interrupted'
-        ) {
+        if (jobStatus !== 'success' && jobStatus !== 'failure' && jobStatus !== 'interrupted') {
           throw new Error(`Job is still ${jobStatus}. Cannot load data from incomplete job.`)
         }
 
@@ -597,10 +624,7 @@ export const useLoadJobData = (): UseLoadJobDataReturn => {
     async (jobId: string): Promise<void> => {
       // Check if stream is already loaded for this job
       const currentState = useChatStore.getState()
-      if (
-        currentState.deepResearchJobId === jobId &&
-        currentState.deepResearchStreamLoaded
-      ) {
+      if (currentState.deepResearchJobId === jobId && currentState.deepResearchStreamLoaded) {
         return
       }
 
@@ -611,14 +635,9 @@ export const useLoadJobData = (): UseLoadJobDataReturn => {
         const statusResponse = await getJobStatus(jobId, idToken || undefined)
         const jobStatus = statusResponse.status
 
-        if (
-          jobStatus !== 'success' &&
-          jobStatus !== 'failure' &&
-          jobStatus !== 'interrupted'
-        ) {
+        if (jobStatus !== 'success' && jobStatus !== 'failure' && jobStatus !== 'interrupted') {
           // Job is still in progress - silently return (live SSE will populate data)
           // This is expected when opening tabs for active jobs
-          console.log(`[importStreamOnly] Job ${jobId} is still ${jobStatus}, skipping archive load`)
           setIsLoading(false)
           return
         }
@@ -646,7 +665,18 @@ export const useLoadJobData = (): UseLoadJobDataReturn => {
         setIsLoading(false)
       }
     },
-    [idToken, clearDeepResearch, streamFullJob, stopAllDeepResearchSpinners, setStreamLoaded, setLoadedJobId, syncMissingJobToFailureState, addErrorCard, completeDeepResearch, setStreaming]
+    [
+      idToken,
+      clearDeepResearch,
+      streamFullJob,
+      stopAllDeepResearchSpinners,
+      setStreamLoaded,
+      setLoadedJobId,
+      syncMissingJobToFailureState,
+      addErrorCard,
+      completeDeepResearch,
+      setStreaming,
+    ]
   )
 
   return {

@@ -54,6 +54,9 @@ from .llm_provider import LLMRole
 from .message_utils import get_latest_user_query
 from .prompt_utils import load_prompt
 from .prompt_utils import render_prompt_template
+from .runtime_llm_tracker import RuntimeLLMObservation
+from .runtime_llm_tracker import RuntimeLLMTrackerCallback
+from .runtime_llm_tracker import get_runtime_model_activity
 from .tool_validation import format_tool_unavailability_error
 from .tool_validation import validate_tool_availability
 
@@ -67,6 +70,8 @@ __all__ = [
     "DEFAULT_DATA_SOURCES",
     "LLMProvider",
     "LLMRole",
+    "RuntimeLLMObservation",
+    "RuntimeLLMTrackerCallback",
     "SourceRegistry",
     "VerboseTraceCallback",
     "extract_json",
@@ -76,6 +81,7 @@ __all__ = [
     "format_tool_unavailability_error",
     "get_checkpointer",
     "get_or_create_session_registry",
+    "get_runtime_model_activity",
     "get_session_registry",
     "get_latest_user_query",
     "is_postgres_dsn",

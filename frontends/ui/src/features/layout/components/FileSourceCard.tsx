@@ -10,7 +10,7 @@
 
 'use client'
 
-import { type FC, useState, useEffect } from 'react'
+import { type FC, useState, useEffect, useMemo } from 'react'
 import { Flex, Text, Button, Spinner } from '@/adapters/ui'
 import { Document, Trash } from '@/adapters/ui/icons'
 import { useIsCurrentSessionBusy } from '@/features/chat'
@@ -114,7 +114,9 @@ const computeMsRemaining = (
  * Format milliseconds remaining into "Expires in H:MM" or the expired label.
  * Returns null when expiration doesn't apply.
  */
-const formatExpiryLabel = (msRemaining: number | null): { text: string; expired: boolean } | null => {
+const formatExpiryLabel = (
+  msRemaining: number | null
+): { text: string; expired: boolean } | null => {
   if (msRemaining === null) return null
   if (msRemaining <= 0) return { text: 'Deletion Pending - Reupload', expired: true }
 
@@ -130,28 +132,23 @@ const useExpiryLabel = (
   intervalHours: number,
   active: boolean
 ): { text: string; expired: boolean } | null => {
-  const [label, setLabel] = useState<{ text: string; expired: boolean } | null>(() =>
-    active ? formatExpiryLabel(computeMsRemaining(uploadedAt, intervalHours)) : null
-  )
+  const [refreshTick, setRefreshTick] = useState(0)
 
   useEffect(() => {
-    if (!active) {
-      setLabel(null)
-      return
-    }
-
-    // Compute immediately
-    setLabel(formatExpiryLabel(computeMsRemaining(uploadedAt, intervalHours)))
+    if (!active) return
 
     // Re-evaluate every 60 seconds
     const id = setInterval(() => {
-      setLabel(formatExpiryLabel(computeMsRemaining(uploadedAt, intervalHours)))
+      setRefreshTick((current) => current + 1)
     }, 60_000)
 
     return () => clearInterval(id)
-  }, [uploadedAt, intervalHours, active])
+  }, [active])
 
-  return label
+  return useMemo(() => {
+    void refreshTick
+    return active ? formatExpiryLabel(computeMsRemaining(uploadedAt, intervalHours)) : null
+  }, [uploadedAt, intervalHours, active, refreshTick])
 }
 
 /**
@@ -240,7 +237,7 @@ export const FileSourceCard: FC<FileSourceCardProps> = ({
               {status === 'available' && <span className="text-success text-xs">✓</span>}
               {status === 'error' && <span className="text-error text-xs">✕</span>}
               <Text
-                kind={config.showSpinner ? "body/regular/sm" : "body/regular/xs"}
+                kind={config.showSpinner ? 'body/regular/sm' : 'body/regular/xs'}
                 style={{ color: config.color }}
               >
                 {config.label}
@@ -277,7 +274,13 @@ export const FileSourceCard: FC<FileSourceCardProps> = ({
           onClick={handleDelete}
           disabled={deleteDisabled}
           aria-label={deleteDisabled ? `Delete ${title} (disabled)` : `Delete ${title}`}
-          title={isProcessing ? "Wait for upload to complete" : deleteDisabled ? "Cannot delete files during active operations" : "Delete file"}
+          title={
+            isProcessing
+              ? 'Wait for upload to complete'
+              : deleteDisabled
+                ? 'Cannot delete files during active operations'
+                : 'Delete file'
+          }
           className="ml-2 flex-shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
         >
           <Trash width={16} height={16} className="text-subtle hover:text-error" />

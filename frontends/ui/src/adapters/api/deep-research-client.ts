@@ -8,7 +8,7 @@
  * Uses native EventSource for proper SSE protocol support including
  * event types, event IDs, and automatic reconnection.
  *
- * @see docs/api.md - Deep Research API (Async Jobs) section
+ * @see docs/source/integration/rest-api.md#async-jobs-api
  */
 
 import { apiConfig } from './config'
@@ -19,6 +19,15 @@ import { apiConfig } from './config'
 
 /** Job status values */
 export type DeepResearchJobStatus = 'submitted' | 'running' | 'success' | 'failure' | 'interrupted'
+
+export interface DeepResearchJobStatusResponse {
+  job_id: string
+  status: DeepResearchJobStatus
+  error: string | null
+  created_at?: string | null
+  updated_at?: string | null
+  elapsed_seconds?: number | null
+}
 
 /** SSE event types from the deep research stream */
 export type DeepResearchEventType =
@@ -203,7 +212,13 @@ export interface DeepResearchCallbacks {
     usage?: { input_tokens: number; output_tokens: number }
   ) => void
   /** Called on tool events */
-  onToolStart?: (name: string, input?: Record<string, unknown>, workflow?: string, eventId?: string, agentId?: string) => void
+  onToolStart?: (
+    name: string,
+    input?: Record<string, unknown>,
+    workflow?: string,
+    eventId?: string,
+    agentId?: string
+  ) => void
   onToolEnd?: (name: string, output?: string, eventId?: string, agentId?: string) => void
   /** Called on artifact updates */
   onTodoUpdate?: (todos: TodoItem[], workflow?: string) => void
@@ -281,7 +296,7 @@ export interface DeepResearchStreamOptions {
   callbacks: DeepResearchCallbacks
   /** Last event ID for reconnection (optional) */
   lastEventId?: string
-  /** Auth token for authenticated requests */
+  /** Retained for API parity; EventSource auth uses the same-origin idToken cookie */
   authToken?: string
 }
 
@@ -305,8 +320,10 @@ export interface DeepResearchClient {
 /** Max consecutive reconnection failures before surfacing an error to the caller */
 const MAX_RECONNECT_ATTEMPTS = 5
 
-export const createDeepResearchClient = (options: DeepResearchStreamOptions): DeepResearchClient => {
-  const { jobId, callbacks, lastEventId, authToken } = options
+export const createDeepResearchClient = (
+  options: DeepResearchStreamOptions
+): DeepResearchClient => {
+  const { jobId, callbacks, lastEventId } = options
 
   let eventSource: EventSource | null = null
   let lastReceivedEventId: string | null = lastEventId || null
@@ -326,11 +343,6 @@ export const createDeepResearchClient = (options: DeepResearchStreamOptions): De
 
     if (lastReceivedEventId) {
       url += `/${lastReceivedEventId}`
-    }
-
-    // Add auth token as query param if provided (EventSource doesn't support headers)
-    if (authToken) {
-      url += `?token=${encodeURIComponent(authToken)}`
     }
 
     return url
@@ -383,15 +395,23 @@ export const createDeepResearchClient = (options: DeepResearchStreamOptions): De
       }
 
       case 'job.heartbeat': {
-        const heartbeatData = rawData as { data?: { uptime_seconds?: number }; uptime_seconds?: number }
-        const uptimeSeconds = heartbeatData.data?.uptime_seconds ?? heartbeatData.uptime_seconds ?? 0
+        const heartbeatData = rawData as {
+          data?: { uptime_seconds?: number }
+          uptime_seconds?: number
+        }
+        const uptimeSeconds =
+          heartbeatData.data?.uptime_seconds ?? heartbeatData.uptime_seconds ?? 0
         callbacks.onHeartbeat?.(uptimeSeconds)
         break
       }
 
       case 'job.status': {
         // job.status wraps status in data property
-        const statusWrapper = rawData as { data?: { status: DeepResearchJobStatus; error?: string }; status?: DeepResearchJobStatus; error?: string }
+        const statusWrapper = rawData as {
+          data?: { status: DeepResearchJobStatus; error?: string }
+          status?: DeepResearchJobStatus
+          error?: string
+        }
         const statusData = statusWrapper.data || statusWrapper
         callbacks.onJobStatus?.(statusData.status!, statusData.error)
 
@@ -405,7 +425,9 @@ export const createDeepResearchClient = (options: DeepResearchStreamOptions): De
           isTerminated = true
           eventSource?.close()
           // Only call onError for actual failures, not user-initiated cancellations
-          const isUserCancelled = statusData.status === 'interrupted' && statusData.error?.toLowerCase().includes('cancelled by user')
+          const isUserCancelled =
+            statusData.status === 'interrupted' &&
+            statusData.error?.toLowerCase().includes('cancelled by user')
           if (!isUserCancelled && statusData.error) {
             callbacks.onError?.(new Error(statusData.error || `Job ${statusData.status}`))
           }
@@ -415,14 +437,34 @@ export const createDeepResearchClient = (options: DeepResearchStreamOptions): De
 
       case 'workflow.start': {
         // workflow events have nested structure: { id, name, timestamp, data: { input }, metadata: { agent_id } }
-        const workflowData = rawData as { id?: string; name: string; data?: { input?: string }; metadata?: { agent_id?: string } }
-        callbacks.onWorkflowStart?.(workflowData.name, workflowData.data?.input, workflowData.id, workflowData.metadata?.agent_id)
+        const workflowData = rawData as {
+          id?: string
+          name: string
+          data?: { input?: string }
+          metadata?: { agent_id?: string }
+        }
+        callbacks.onWorkflowStart?.(
+          workflowData.name,
+          workflowData.data?.input,
+          workflowData.id,
+          workflowData.metadata?.agent_id
+        )
         break
       }
 
       case 'workflow.end': {
-        const workflowData = rawData as { id?: string; name: string; data?: { output?: string }; metadata?: { agent_id?: string } }
-        callbacks.onWorkflowEnd?.(workflowData.name, workflowData.data?.output, workflowData.id, workflowData.metadata?.agent_id)
+        const workflowData = rawData as {
+          id?: string
+          name: string
+          data?: { output?: string }
+          metadata?: { agent_id?: string }
+        }
+        callbacks.onWorkflowEnd?.(
+          workflowData.name,
+          workflowData.data?.output,
+          workflowData.id,
+          workflowData.metadata?.agent_id
+        )
         break
       }
 
@@ -445,7 +487,12 @@ export const createDeepResearchClient = (options: DeepResearchStreamOptions): De
           data?: { output?: string }
           metadata?: {
             thinking?: string
-            usage?: { input_tokens?: number; output_tokens?: number; prompt_tokens?: number; completion_tokens?: number }
+            usage?: {
+              input_tokens?: number
+              output_tokens?: number
+              prompt_tokens?: number
+              completion_tokens?: number
+            }
           }
         }
         const output = endData.data?.output || ''
@@ -472,20 +519,41 @@ export const createDeepResearchClient = (options: DeepResearchStreamOptions): De
           metadata?: { workflow?: string; agent_id?: string }
         }
         const normalizedInput = normalizeToolInput(toolData.data?.input)
-        callbacks.onToolStart?.(toolData.name, normalizedInput, toolData.metadata?.workflow, toolData.id, toolData.metadata?.agent_id)
+        callbacks.onToolStart?.(
+          toolData.name,
+          normalizedInput,
+          toolData.metadata?.workflow,
+          toolData.id,
+          toolData.metadata?.agent_id
+        )
         break
       }
 
       case 'tool.end': {
-        const toolData = rawData as { id?: string; name: string; data?: { output?: string }; metadata?: { agent_id?: string } }
-        callbacks.onToolEnd?.(toolData.name, toolData.data?.output, toolData.id, toolData.metadata?.agent_id)
+        const toolData = rawData as {
+          id?: string
+          name: string
+          data?: { output?: string }
+          metadata?: { agent_id?: string }
+        }
+        callbacks.onToolEnd?.(
+          toolData.name,
+          toolData.data?.output,
+          toolData.id,
+          toolData.metadata?.agent_id
+        )
         break
       }
 
       case 'artifact.update': {
         // artifact.update has nested structure: { id, timestamp, data: { type, content, url?, output_category? }, metadata?: { workflow } }
         const artifactWrapper = rawData as {
-          data?: { type: ArtifactType; content: string | TodoItem[]; url?: string; output_category?: string }
+          data?: {
+            type: ArtifactType
+            content: string | TodoItem[]
+            url?: string
+            output_category?: string
+          }
           type?: ArtifactType
           content?: string | TodoItem[]
           url?: string
@@ -502,11 +570,19 @@ export const createDeepResearchClient = (options: DeepResearchStreamOptions): De
             break
           case 'citation_source':
             // citation_source = "Referenced" sources (discovered during search)
-            callbacks.onCitationUpdate?.(artifactData.url || '', artifactData.content as string, false)
+            callbacks.onCitationUpdate?.(
+              artifactData.url || '',
+              artifactData.content as string,
+              false
+            )
             break
           case 'citation_use':
             // citation_use = "Cited" sources (actually used in the report)
-            callbacks.onCitationUpdate?.(artifactData.url || '', artifactData.content as string, true)
+            callbacks.onCitationUpdate?.(
+              artifactData.url || '',
+              artifactData.content as string,
+              true
+            )
             break
           case 'file': {
             // file artifacts are written during research — extract filename from path
@@ -517,7 +593,11 @@ export const createDeepResearchClient = (options: DeepResearchStreamOptions): De
             break
           }
           case 'output':
-            callbacks.onOutputUpdate?.(artifactData.content as string, artifactData.output_category, artifactWorkflow)
+            callbacks.onOutputUpdate?.(
+              artifactData.content as string,
+              artifactData.output_category,
+              artifactWorkflow
+            )
             break
           default:
             if (process.env.NODE_ENV === 'development') {
@@ -604,7 +684,9 @@ export const createDeepResearchClient = (options: DeepResearchStreamOptions): De
         reconnectAttempts++
         if (reconnectAttempts <= MAX_RECONNECT_ATTEMPTS) {
           if (process.env.NODE_ENV === 'development') {
-            console.warn(`[SSE] Reconnecting (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})…`)
+            console.warn(
+              `[SSE] Reconnecting (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})…`
+            )
           }
           return // let EventSource retry on its own
         }
@@ -677,7 +759,7 @@ const getDeepResearchBaseUrl = (): string => {
 export const getJobStatus = async (
   jobId: string,
   authToken?: string
-): Promise<{ job_id: string; status: DeepResearchJobStatus; error: string | null }> => {
+): Promise<DeepResearchJobStatusResponse> => {
   const url = `${getDeepResearchBaseUrl()}/job/${jobId}`
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
@@ -766,10 +848,7 @@ export interface JobStateResponse {
 }
 
 /** Get job state/artifacts (for catching up on missed events) */
-export const getJobState = async (
-  jobId: string,
-  authToken?: string
-): Promise<JobStateResponse> => {
+export const getJobState = async (jobId: string, authToken?: string): Promise<JobStateResponse> => {
   const url = `${getDeepResearchBaseUrl()}/job/${jobId}/state`
   const headers: HeadersInit = {
     'Content-Type': 'application/json',

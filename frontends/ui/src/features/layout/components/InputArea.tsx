@@ -76,7 +76,9 @@ export const InputArea: FC<InputAreaProps> = ({
   // Deep research completion state - disables new submissions after research completes
   const deepResearchStatus = useChatStore((state) => state.deepResearchStatus)
   const isDeepResearchStreaming = useChatStore((state) => state.isDeepResearchStreaming)
-  const deepResearchOwnerConversationId = useChatStore((state) => state.deepResearchOwnerConversationId)
+  const deepResearchOwnerConversationId = useChatStore(
+    (state) => state.deepResearchOwnerConversationId
+  )
 
   // Check for active deep research in conversation messages (persisted state)
   // This handles the case where ephemeral state has been reset (page refresh, session switch)
@@ -136,9 +138,9 @@ export const InputArea: FC<InputAreaProps> = ({
   useFileUploadBanners()
 
   // -- Pending files warning state --
-  // Tracks whether we've shown the pending-files warning for the current upload batch.
-  // When true, the next submit will dismiss the warning and send the message.
-  const [pendingFilesWarningActive, setPendingFilesWarningActive] = useState(false)
+  // Tracks whether the pending-files warning is currently shown.
+  // This does not affect rendering, so a ref avoids unnecessary re-renders.
+  const pendingFilesWarningActiveRef = useRef(false)
 
   // Track the number of uploading/ingesting files so we can detect NEW upload interactions
   // and reset the acknowledged state.
@@ -164,15 +166,15 @@ export const InputArea: FC<InputAreaProps> = ({
     const prev = prevPendingCountRef.current
     // New upload detected: pending count went from 0 → >0
     if (prev === 0 && pendingCount > 0) {
-      setPendingFilesWarningActive(false)
+      pendingFilesWarningActiveRef.current = false
     }
     // Files all finished while warning was active → auto-dismiss the warning
-    if (prev > 0 && pendingCount === 0 && pendingFilesWarningActive) {
+    if (prev > 0 && pendingCount === 0 && pendingFilesWarningActiveRef.current) {
       removeFileUploadWarning()
-      setPendingFilesWarningActive(false)
+      pendingFilesWarningActiveRef.current = false
     }
     prevPendingCountRef.current = pendingCount
-  }, [pendingCount, pendingFilesWarningActive, removeFileUploadWarning])
+  }, [pendingCount, removeFileUploadWarning])
 
   // Select the active hook's methods based on mode
   const activeChat = connectionMode === 'websocket' ? wsChat : sseChat
@@ -236,17 +238,17 @@ export const InputArea: FC<InputAreaProps> = ({
     // 1. Add a warning banner to the chat feed
     // 2. Keep the message in the input (don't clear or send)
     // 3. Mark warning as active so the next submit will proceed
-    if (pendingCount > 0 && !pendingFilesWarningActive) {
+    if (pendingCount > 0 && !pendingFilesWarningActiveRef.current) {
       addFileUploadStatusCard('pending_warning', pendingCount, `pending-warning-${Date.now()}`)
-      setPendingFilesWarningActive(true)
+      pendingFilesWarningActiveRef.current = true
       return // Don't send — keep message in input
     }
 
     // If the warning is currently active (user is re-submitting to acknowledge):
     // Dismiss the warning banner first, then send the message
-    if (pendingFilesWarningActive) {
+    if (pendingFilesWarningActiveRef.current) {
       removeFileUploadWarning()
-      setPendingFilesWarningActive(false)
+      pendingFilesWarningActiveRef.current = false
     }
 
     // Proceed with normal send
@@ -259,7 +261,6 @@ export const InputArea: FC<InputAreaProps> = ({
     respondToInteraction,
     sendMessage,
     pendingCount,
-    pendingFilesWarningActive,
     addFileUploadStatusCard,
     removeFileUploadWarning,
   ])
@@ -443,13 +444,11 @@ export const InputArea: FC<InputAreaProps> = ({
               }}
               disabled={isDisabledByAuth || !knowledgeLayerAvailable}
               aria-label="Open uploaded files"
-              title={knowledgeLayerAvailable ? "Available files" : "File upload not available"}
+              title={knowledgeLayerAvailable ? 'Available files' : 'File upload not available'}
             >
               <Flex align="center" gap="1">
                 <Document className="h-3 w-3" />
-                <Text kind="label/bold/sm">
-                  {attachedFilesCount}
-                </Text>
+                <Text kind="label/bold/sm">{attachedFilesCount}</Text>
               </Flex>
             </Button>
 
@@ -490,7 +489,8 @@ export const InputArea: FC<InputAreaProps> = ({
                 align="end"
                 slotContent={
                   <Text kind="body/regular/sm" className="max-w-xs p-3">
-                    Research completed. For further questions or reports, please create a new session.
+                    Research completed. For further questions or reports, please create a new
+                    session.
                   </Text>
                 }
               >
@@ -509,8 +509,8 @@ export const InputArea: FC<InputAreaProps> = ({
                 align="end"
                 slotContent={
                   <Text kind="body/regular/sm" className="max-w-xs p-3">
-                    Research is currently in progress. Chat is paused to prevent generating multiple reports at
-                    the same time.
+                    Research is currently in progress. Chat is paused to prevent generating multiple
+                    reports at the same time.
                   </Text>
                 }
               >
@@ -533,7 +533,11 @@ export const InputArea: FC<InputAreaProps> = ({
                 aria-label={isResponseMode ? 'Send response' : 'Send message'}
                 title="Send query"
               >
-                {isLoading ? <span className="animate-pulse">...</span> : <Paperplane className="h-4 w-4" />}
+                {isLoading ? (
+                  <span className="animate-pulse">...</span>
+                ) : (
+                  <Paperplane className="h-4 w-4" />
+                )}
               </Button>
             )}
           </Flex>

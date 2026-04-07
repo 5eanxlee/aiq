@@ -238,6 +238,7 @@ async def run_agent_job(
 
     from aiq_agent.common import LLMProvider
     from aiq_agent.common import LLMRole
+    from aiq_agent.common import RuntimeLLMTrackerCallback
     from aiq_agent.common import VerboseTraceCallback
     from aiq_agent.common import is_verbose
     from nat.builder.framework_enum import LLMFrameworkEnum
@@ -414,7 +415,9 @@ async def run_agent_job(
                     provider.configure(LLMRole.RESEARCHER, researcher_llm)
 
                 verbose = is_verbose(getattr(fn_config, "verbose", False))
-                callbacks = [VerboseTraceCallback()] if verbose else []
+                callbacks = [RuntimeLLMTrackerCallback(agent_config_name)]
+                if verbose:
+                    callbacks.append(VerboseTraceCallback())
 
                 raw_event_store = EventStore(db_url, job_id)
                 event_store = BatchingEventStore(raw_event_store)

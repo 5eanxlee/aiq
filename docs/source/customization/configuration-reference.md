@@ -27,7 +27,7 @@ You can reference environment variables anywhere in the YAML using shell-style s
 api_key: ${NVIDIA_API_KEY}
 
 # Variable with a default value
-checkpoint_db: ${AIQ_CHECKPOINT_DB:-./checkpoints.db}
+checkpoint_db: ${AIQ_CHECKPOINT_DB:-./var/checkpoints.db}
 
 # Nested in a URL
 collection_name: ${COLLECTION_NAME:-test_collection}
@@ -57,7 +57,7 @@ general:
   front_end:                 # Only for web/API mode
     _type: aiq_api
     runner_class: aiq_api.plugin.AIQAPIWorker
-    db_url: ${NAT_JOB_STORE_DB_URL:-sqlite+aiosqlite:///./jobs.db}
+    db_url: ${NAT_JOB_STORE_DB_URL:-sqlite+aiosqlite:///./var/jobs.db}
     expiry_seconds: 86400
     cors:
       allow_origin_regex: 'http://localhost(:\d+)?|http://127.0.0.1(:\d+)?'
@@ -74,7 +74,7 @@ general:
 | `telemetry.logging.console.level` | `str` | `INFO` | Log level: `DEBUG`, `INFO`, `WARNING`, `ERROR`. |
 | `telemetry.tracing` | `object` | -- | Optional tracing configuration (Phoenix, OpenTelemetry). |
 | `front_end._type` | `str` | -- | Front-end type. Use `aiq_api` for the web API server. Omit for CLI mode. |
-| `front_end.db_url` | `str` | `sqlite+aiosqlite:///./jobs.db` | Database URL for async job persistence. |
+| `front_end.db_url` | `str` | `sqlite+aiosqlite:///./var/jobs.db` | Database URL for async job persistence. |
 | `front_end.expiry_seconds` | `int` | `86400` | How long completed jobs remain in the database (seconds). |
 | `front_end.cors` | `object` | -- | CORS settings for the API server. |
 
@@ -186,7 +186,7 @@ functions:
     chroma_dir: ${AIQ_CHROMA_DIR:-/tmp/chroma_data}
     generate_summary: true
     summary_model: summary_llm
-    summary_db: ${AIQ_SUMMARY_DB:-sqlite+aiosqlite:///./summaries.db}
+    summary_db: ${AIQ_SUMMARY_DB:-sqlite+aiosqlite:///./var/summaries.db}
 ```
 
 ```yaml
@@ -210,7 +210,7 @@ functions:
 | `top_k` | `int` | `5` | Number of results to return per query. |
 | `generate_summary` | `bool` | `false` | Generate one-sentence summaries for ingested documents. |
 | `summary_model` | `str` | `None` | LLM reference from `llms` section. Required when `generate_summary: true`. |
-| `summary_db` | `str` | `sqlite+aiosqlite:///./summaries.db` | Database URL for document summaries (SQLite or PostgreSQL). |
+| `summary_db` | `str` | `sqlite+aiosqlite:///./var/summaries.db` | Database URL for document summaries (SQLite or PostgreSQL). |
 | `chroma_dir` | `str` | `/tmp/chroma_data` | ChromaDB persistence directory. LlamaIndex backend only. |
 | `rag_url` | `str` | `http://localhost:8081/v1` | RAG query server URL. Foundational RAG backend only. |
 | `ingest_url` | `str` | `http://localhost:8082/v1` | RAG ingestion server URL. Foundational RAG backend only. |
@@ -337,7 +337,7 @@ workflow:
   use_async_deep_research: true
   max_history: 20
   verbose: true
-  checkpoint_db: ${AIQ_CHECKPOINT_DB:-./checkpoints.db}
+  checkpoint_db: ${AIQ_CHECKPOINT_DB:-./var/checkpoints.db}
 ```
 
 | Parameter | Type | Default | Description |
@@ -348,7 +348,7 @@ workflow:
 | `use_async_deep_research` | `bool` | `false` | Submit deep research as an async background job (requires [Dask](https://www.dask.org/) scheduler). |
 | `max_history` | `int` | `20` | Maximum number of messages to keep in conversation history before trimming. |
 | `verbose` | `bool` | `false` | Enable verbose logging. |
-| `checkpoint_db` | `str` | `./checkpoints.db` | SQLite path or PostgreSQL DSN for persistent conversation checkpoints. |
+| `checkpoint_db` | `str` | `./var/checkpoints.db` | SQLite path or PostgreSQL DSN for persistent conversation checkpoints. |
 
 > **Note:** `interactive_auth` is a YAML-level field consumed by the CLI entry point (`start_cli.sh` / `aiq-research`), not a Pydantic field on `ChatDeepResearcherConfig`. It can be set in YAML config files but is not part of the workflow config class.
 
@@ -457,7 +457,7 @@ workflow:
   _type: chat_deepresearcher_agent
   enable_escalation: true              # Allow deep research routing
   enable_clarifier: true               # Ask clarifying questions first
-  checkpoint_db: ${AIQ_CHECKPOINT_DB:-./checkpoints.db}
+  checkpoint_db: ${AIQ_CHECKPOINT_DB:-./var/checkpoints.db}
 ```
 
 ## Provided Config Files

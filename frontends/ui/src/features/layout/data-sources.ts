@@ -23,6 +23,8 @@ export interface DataSource {
   category: DataSourceCategory
   /** Whether the source is enabled by default */
   defaultEnabled: boolean
+  /** Whether the source requires user auth in the UI */
+  requiresAuth?: boolean
 }
 
 /**

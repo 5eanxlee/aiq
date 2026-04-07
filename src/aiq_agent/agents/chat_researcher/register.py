@@ -27,6 +27,7 @@ from aiq_agent.common import _create_chat_response
 from aiq_agent.common import format_data_source_tools
 from aiq_agent.common import get_checkpointer
 from aiq_agent.common import is_verbose
+from aiq_agent.common import RuntimeLLMTrackerCallback
 from aiq_agent.common.citation_verification import get_or_create_session_registry
 from aiq_agent.common.citation_verification import reset_session_registry
 from aiq_agent.common.citation_verification import set_session_registry
@@ -77,7 +78,9 @@ async def intent_classifier(config: IntentClassifierConfig, builder: Builder):
     llm = await builder.get_llm(config.llm, wrapper_type=LLMFrameworkEnum.LANGCHAIN)
     tools = await builder.get_tools(tool_names=config.tools, wrapper_type=LLMFrameworkEnum.LANGCHAIN)
     verbose = is_verbose(config.verbose)
-    callbacks = [VerboseTraceCallback()] if verbose else []
+    callbacks = [RuntimeLLMTrackerCallback("intent_classifier")]
+    if verbose:
+        callbacks.append(VerboseTraceCallback())
 
     tools_info = [{"name": getattr(t, "name", str(t)), "description": getattr(t, "description", "")} for t in tools]
     classifier = IntentClassifier(
@@ -218,7 +221,9 @@ async def chat_deepresearcher_agent(config: ChatDeepResearcherConfig, builder: B
         return True, ""
 
     verbose = is_verbose(config.verbose)
-    callbacks = [VerboseTraceCallback()] if verbose else []
+    callbacks = [RuntimeLLMTrackerCallback("chat_deepresearcher_agent")]
+    if verbose:
+        callbacks.append(VerboseTraceCallback())
 
     deep_research_job_submitter = None
     if config.use_async_deep_research:

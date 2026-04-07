@@ -18,5 +18,6 @@
 from .collections import add_collection_routes
 from .documents import add_document_routes
 from .jobs import register_job_routes
+from .providers import register_provider_routes
 
-__all__ = ["add_collection_routes", "add_document_routes", "register_job_routes"]
+__all__ = ["add_collection_routes", "add_document_routes", "register_job_routes", "register_provider_routes"]

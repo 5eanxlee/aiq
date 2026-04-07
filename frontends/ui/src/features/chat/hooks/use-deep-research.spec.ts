@@ -11,6 +11,7 @@ import { useDeepResearch } from './use-deep-research'
 
 const mockUpdateDeepResearchStatus = vi.fn()
 const mockCompleteDeepResearch = vi.fn()
+const mockFinalizeDeepResearchRun = vi.fn()
 const mockAddDeepResearchCitation = vi.fn()
 const mockSetReportContent = vi.fn()
 const mockAddThinkingStep = vi.fn(() => 'step-1')
@@ -47,6 +48,9 @@ let mockStoreState = {
   deepResearchLLMSteps: [] as unknown[],
   deepResearchToolCalls: [] as unknown[],
   deepResearchCitations: [] as unknown[],
+  deepResearchStartedAtMs: null as number | null,
+  deepResearchCompletedAtMs: null as number | null,
+  deepResearchDurationMs: null as number | null,
   deepResearchOwnerConversationId: 'test-conv-123',
   currentConversation: { id: 'test-conv-123' } as { id: string } | null,
   activeDeepResearchMessageId: null as string | null,
@@ -59,6 +63,7 @@ vi.mock('../store', () => ({
       ...mockStoreState,
       updateDeepResearchStatus: mockUpdateDeepResearchStatus,
       completeDeepResearch: mockCompleteDeepResearch,
+      finalizeDeepResearchRun: mockFinalizeDeepResearchRun,
       addDeepResearchCitation: mockAddDeepResearchCitation,
       setReportContent: mockSetReportContent,
       addThinkingStep: mockAddThinkingStep,
@@ -93,6 +98,7 @@ vi.mock('../store', () => ({
         stopAllDeepResearchSpinners: mockStopAllDeepResearchSpinners,
         patchConversationMessage: mockPatchConversationMessage,
         completeDeepResearch: mockCompleteDeepResearch,
+        finalizeDeepResearchRun: mockFinalizeDeepResearchRun,
         setStreaming: mockSetStreaming,
         setStreamLoaded: mockSetStreamLoaded,
       })),
@@ -187,6 +193,9 @@ describe('useDeepResearch', () => {
       deepResearchLLMSteps: [],
       deepResearchToolCalls: [],
       deepResearchCitations: [],
+      deepResearchStartedAtMs: null,
+      deepResearchCompletedAtMs: null,
+      deepResearchDurationMs: null,
       deepResearchOwnerConversationId: 'test-conv-123',
       currentConversation: { id: 'test-conv-123' },
       activeDeepResearchMessageId: null,
@@ -198,6 +207,7 @@ describe('useDeepResearch', () => {
       persistDeepResearchToSession: mockPersistDeepResearchToSession,
       addDeepResearchBanner: mockAddDeepResearchBanner,
       stopAllDeepResearchSpinners: mockStopAllDeepResearchSpinners,
+      finalizeDeepResearchRun: mockFinalizeDeepResearchRun,
     })) as unknown as typeof useChatStore.getState
   })
 
@@ -389,6 +399,7 @@ describe('useDeepResearch', () => {
     test('fallback cleans up locally if SSE does not deliver interrupted status', async () => {
       mockStoreState.deepResearchJobId = 'job-456'
       mockStoreState.isDeepResearchStreaming = true
+      mockStoreState.deepResearchStartedAtMs = Date.now()
       mockStoreState.deepResearchOwnerConversationId = 'test-conv-123'
       mockStoreState.activeDeepResearchMessageId = 'msg-1'
       mockCancelJob.mockResolvedValue({ cancelled: true })
@@ -410,7 +421,14 @@ describe('useDeepResearch', () => {
       expect(mockStopAllDeepResearchSpinners).toHaveBeenCalled()
       expect(mockCompleteDeepResearch).toHaveBeenCalled()
       expect(mockSetStreaming).toHaveBeenCalledWith(false)
-      expect(mockAddDeepResearchBanner).toHaveBeenCalledWith('cancelled', 'job-456', 'test-conv-123')
+      expect(mockAddDeepResearchBanner).toHaveBeenCalledWith(
+        'cancelled',
+        'job-456',
+        'test-conv-123',
+        expect.objectContaining({
+          durationMs: expect.any(Number),
+        })
+      )
       expect(consoleWarnSpy).toHaveBeenCalledWith(
         expect.stringContaining('Cancel fallback'),
         expect.any(Number),
@@ -555,6 +573,7 @@ describe('useDeepResearch', () => {
 
     test('onJobStatus success completes research and patches message', async () => {
       await setupConnectedHook({
+        deepResearchStartedAtMs: Date.now(),
         reportContent: 'Test report',
         activeDeepResearchMessageId: 'msg-123',
       })
@@ -583,6 +602,7 @@ describe('useDeepResearch', () => {
         expect.objectContaining({
           totalTokens: expect.any(Number),
           toolCallCount: expect.any(Number),
+          durationMs: expect.any(Number),
         })
       )
       expect(mockPatchConversationMessage).toHaveBeenCalledWith(
@@ -848,6 +868,7 @@ describe('useDeepResearch', () => {
 
     test('onError logs error and performs full cleanup when backend is unreachable', async () => {
       await setupConnectedHook({
+        deepResearchStartedAtMs: Date.now(),
         activeDeepResearchMessageId: 'msg-123',
         reportContent: 'Partial report',
       })
@@ -895,7 +916,14 @@ describe('useDeepResearch', () => {
           showViewReport: true,
         })
       )
-      expect(mockAddDeepResearchBanner).toHaveBeenCalledWith('failure', 'job-456', 'test-conv-123')
+      expect(mockAddDeepResearchBanner).toHaveBeenCalledWith(
+        'failure',
+        'job-456',
+        'test-conv-123',
+        expect.objectContaining({
+          durationMs: expect.any(Number),
+        })
+      )
       expect(mockStopAllDeepResearchSpinners).toHaveBeenCalled()
       expect(mockClient?.disconnect).toHaveBeenCalled()
       expect(mockSetStreamLoaded).toHaveBeenCalledWith(true)
@@ -1019,6 +1047,7 @@ describe('useDeepResearch', () => {
         {
           totalTokens: 1150,
           toolCallCount: 3,
+          durationMs: 120000,
         }
       )
       expect(mockPatchConversationMessage).toHaveBeenCalledWith(

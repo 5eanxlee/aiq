@@ -24,7 +24,6 @@ vi.mock('../store', () => ({
       shownBannersForJobs: {},
       markBannerShown: mockMarkBannerShown,
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return selector ? (selector as any)(state) : state
   }),
 }))
@@ -86,7 +85,6 @@ describe('useFileUploadBanners', () => {
         shownBannersForJobs: {},
         markBannerShown: mockMarkBannerShown,
       }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return selector ? (selector as any)(state) : state
     })
 
@@ -124,7 +122,6 @@ describe('useFileUploadBanners', () => {
         shownBannersForJobs: {},
         markBannerShown: mockMarkBannerShown,
       }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return selector ? (selector as any)(state) : state
     })
 
@@ -159,7 +156,6 @@ describe('useFileUploadBanners', () => {
         },
         markBannerShown: mockMarkBannerShown,
       }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return selector ? (selector as any)(state) : state
     })
 
@@ -198,7 +194,6 @@ describe('useFileUploadBanners', () => {
         shownBannersForJobs: {},
         markBannerShown: mockMarkBannerShown,
       }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return selector ? (selector as any)(state) : state
     })
 
@@ -238,7 +233,6 @@ describe('useFileUploadBanners', () => {
         shownBannersForJobs: {},
         markBannerShown: mockMarkBannerShown,
       }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return selector ? (selector as any)(state) : state
     })
 
@@ -276,7 +270,6 @@ describe('useFileUploadBanners', () => {
         shownBannersForJobs: {},
         markBannerShown: mockMarkBannerShown,
       }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return selector ? (selector as any)(state) : state
     })
 
@@ -317,7 +310,6 @@ describe('useFileUploadBanners', () => {
         shownBannersForJobs: {},
         markBannerShown: mockMarkBannerShown,
       }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return selector ? (selector as any)(state) : state
     })
 
@@ -357,7 +349,6 @@ describe('useFileUploadBanners', () => {
         shownBannersForJobs: {},
         markBannerShown: mockMarkBannerShown,
       }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return selector ? (selector as any)(state) : state
     })
 

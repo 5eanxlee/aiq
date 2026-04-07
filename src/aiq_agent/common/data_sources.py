@@ -69,6 +69,7 @@ def filter_tools_by_sources(tools: list[Any], data_sources: list[str] | None) ->
 
     normalized = {source.lower() for source in data_sources}
     include_web_search = "web_search" in normalized
+    include_paper_search = "paper_search" in normalized
     include_knowledge = "knowledge_layer" in normalized
 
     filtered = []
@@ -76,7 +77,10 @@ def filter_tools_by_sources(tools: list[Any], data_sources: list[str] | None) ->
         name = getattr(tool, "name", "")
         name_lower = name.lower()
 
-        if "web" in name_lower or "tavily" in name_lower:
+        if "paper" in name_lower or "scholar" in name_lower or "serper" in name_lower:
+            if include_paper_search:
+                filtered.append(tool)
+        elif "web" in name_lower or "tavily" in name_lower:
             if include_web_search:
                 filtered.append(tool)
         elif "knowledge" in name_lower or "document" in name_lower or "internal" in name_lower:
@@ -127,6 +131,13 @@ def format_data_source_tools(data_sources: list[str]) -> list[dict[str, str]]:
     for source in data_sources:
         if source == "web_search":
             tools_info.append({"name": "web_search", "description": "Search the web for real-time information."})
+        elif source == "paper_search":
+            tools_info.append(
+                {
+                    "name": "paper_search",
+                    "description": "Search academic papers and scholarly sources for research evidence.",
+                }
+            )
         else:
             tools_info.append({"name": "knowledge_search", "description": "Search uploaded documents and files."})
 

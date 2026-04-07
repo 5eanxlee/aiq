@@ -21,6 +21,7 @@ from langchain_core.messages import HumanMessage
 from pydantic import Field
 
 from aiq_agent.common import LLMProvider
+from aiq_agent.common import RuntimeLLMTrackerCallback
 from aiq_agent.common import VerboseTraceCallback
 from aiq_agent.common import _create_chat_response
 from aiq_agent.common import filter_tools_by_sources
@@ -61,7 +62,9 @@ async def shallow_research_agent(config: ShallowResearchAgentConfig, builder: Bu
     provider.set_default(llm)
 
     verbose = is_verbose(config.verbose)
-    callbacks = [VerboseTraceCallback()] if verbose else []
+    callbacks = [RuntimeLLMTrackerCallback("shallow_research_agent")]
+    if verbose:
+        callbacks.append(VerboseTraceCallback())
 
     agent = ShallowResearcherAgent(
         llm_provider=provider,

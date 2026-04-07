@@ -196,6 +196,7 @@ export const useWebSocketChat = (options: UseWebSocketChatOptions = {}): UseWebS
     // Conversation management
     updateConversationTitle,
   } = useChatStore()
+  const currentConversationId = currentConversation?.id ?? null
 
   // Sync authenticated user ID to store when auth state changes
   useEffect(() => {
@@ -242,7 +243,10 @@ export const useWebSocketChat = (options: UseWebSocketChatOptions = {}): UseWebS
     return {
       onResponse: (content: string, status: string, isFinal: boolean, parentId?: string) => {
         if (isStaleMessage(parentId)) {
-          console.warn('Dropping stale system_response (parent_id mismatch)', { parentId, active: wsClientRef.current?.activeParentId })
+          console.warn('Dropping stale system_response (parent_id mismatch)', {
+            parentId,
+            active: wsClientRef.current?.activeParentId,
+          })
           return
         }
 
@@ -276,8 +280,9 @@ export const useWebSocketChat = (options: UseWebSocketChatOptions = {}): UseWebS
               }
 
               // Pattern 2: Markdown Report Title heading
-              const reportTitleMatch = planMsg.text.match(/\*\*Report Title[:\s]*\*\*\s*\n?\s*\*?([^*\n]+)/i)
-                || planMsg.text.match(/Report Title[:\s]*\n?\s*\*?([^*\n]+)/i)
+              const reportTitleMatch =
+                planMsg.text.match(/\*\*Report Title[:\s]*\*\*\s*\n?\s*\*?([^*\n]+)/i) ||
+                planMsg.text.match(/Report Title[:\s]*\n?\s*\*?([^*\n]+)/i)
               if (reportTitleMatch) {
                 extractedTitle = reportTitleMatch[1].trim()
                 break
@@ -309,9 +314,8 @@ export const useWebSocketChat = (options: UseWebSocketChatOptions = {}): UseWebS
                 .trim()
 
               // Truncate to reasonable length
-              const title = cleanTitle.length > 80
-                ? cleanTitle.substring(0, 77) + '...'
-                : cleanTitle
+              const title =
+                cleanTitle.length > 80 ? cleanTitle.substring(0, 77) + '...' : cleanTitle
 
               if (title.length > 0) {
                 updateConversationTitle(currentConversation.id, title)
@@ -375,7 +379,11 @@ export const useWebSocketChat = (options: UseWebSocketChatOptions = {}): UseWebS
         }
       },
 
-      onIntermediateStep: (content: NATIntermediateStepContent | string, status: string, _parentId?: string) => {
+      onIntermediateStep: (
+        content: NATIntermediateStepContent | string,
+        status: string,
+        _parentId?: string
+      ) => {
         // NAT uses an internal step ID (not the user message ID) for intermediate step parent_id,
         // so we cannot use parent_id for stale detection here. Guard instead on isStreaming:
         // if we are not currently streaming, the workflow that sent this step was already
@@ -458,13 +466,26 @@ export const useWebSocketChat = (options: UseWebSocketChatOptions = {}): UseWebS
         // Add to PlanTab FIRST so it's captured when saving prompt message
         addPlanMessage({
           text: prompt.text,
-          inputType: prompt.input_type as 'text' | 'multiple_choice' | 'binary_choice' | 'approval' | 'notification',
+          inputType: prompt.input_type as
+            | 'text'
+            | 'multiple_choice'
+            | 'binary_choice'
+            | 'approval'
+            | 'notification',
         })
 
         // Add as an agent prompt in the chat with HITL routing info for persistence
         // This captures current planMessages (including the one just added) for session restoration
         const promptType = mapHumanPromptType(prompt.input_type)
-        addAgentPrompt(promptType, prompt.text, prompt.options, undefined, promptId, parentId, inputType)
+        addAgentPrompt(
+          promptType,
+          prompt.text,
+          prompt.options,
+          undefined,
+          promptId,
+          parentId,
+          inputType
+        )
 
         // Pause streaming while waiting for user response
         setStreaming(false)
@@ -478,7 +499,11 @@ export const useWebSocketChat = (options: UseWebSocketChatOptions = {}): UseWebS
 
           const errorInfo = backendUp
             ? getTransportFailure(errorContent.message, errorContent.details)
-            : { code: 'connection.failed' as const, message: errorContent.message, details: errorContent.details }
+            : {
+                code: 'connection.failed' as const,
+                message: errorContent.message,
+                details: errorContent.details,
+              }
 
           addErrorCard(errorInfo.code, errorInfo.message, errorInfo.details)
           setCurrentStatus(null)
@@ -498,11 +523,7 @@ export const useWebSocketChat = (options: UseWebSocketChatOptions = {}): UseWebS
 
         // Map NAT error to frontend error code and display error card
         const errorCode = mapNATErrorToErrorCode(errorContent.code)
-        addErrorCard(
-          errorCode,
-          errorContent.message,
-          errorContent.details,
-        )
+        addErrorCard(errorCode, errorContent.message, errorContent.details)
 
         setCurrentStatus(null)
         setStreaming(false)
@@ -571,18 +592,18 @@ export const useWebSocketChat = (options: UseWebSocketChatOptions = {}): UseWebS
    * Initialize WebSocket client when conversation changes
    */
   useEffect(() => {
-    if (!currentConversation || !autoConnect) return
+    if (!currentConversationId || !autoConnect) return
 
     // Create new client if needed
     if (!wsClientRef.current) {
       wsClientRef.current = createNATWebSocketClient({
-        conversationId: currentConversation.id,
+        conversationId: currentConversationId,
         callbacks: createCallbacks(),
       })
       wsClientRef.current.connect()
     } else {
       // Update conversation ID on existing client
-      wsClientRef.current.updateConversationId(currentConversation.id)
+      wsClientRef.current.updateConversationId(currentConversationId)
     }
 
     // Cleanup on unmount
@@ -592,7 +613,7 @@ export const useWebSocketChat = (options: UseWebSocketChatOptions = {}): UseWebS
         wsClientRef.current = null
       }
     }
-  }, [currentConversation?.id, autoConnect, createCallbacks])
+  }, [currentConversationId, autoConnect, createCallbacks])
 
   /**
    * Send a message via WebSocket
@@ -610,16 +631,18 @@ export const useWebSocketChat = (options: UseWebSocketChatOptions = {}): UseWebS
       const trackedFiles = useDocumentsStore.getState().trackedFiles
       const sessionFiles = sessionId
         ? trackedFiles.filter(
-            (f) => f.collectionName === sessionId && (f.status === 'ingesting' || f.status === 'success')
+            (f) =>
+              f.collectionName === sessionId && (f.status === 'ingesting' || f.status === 'success')
           )
         : []
 
       const hasSessionFiles = sessionFiles.length > 0
 
       // Add knowledge_layer to data sources if files exist
-      const dataSourcesForMessage = hasSessionFiles && layoutState.knowledgeLayerAvailable
-        ? [...enabledDataSources, 'knowledge_layer']
-        : enabledDataSources
+      const dataSourcesForMessage =
+        hasSessionFiles && layoutState.knowledgeLayerAvailable
+          ? [...enabledDataSources, 'knowledge_layer']
+          : enabledDataSources
 
       // Prepare file metadata for display
       const messageFiles = sessionFiles.map((f) => ({
@@ -693,7 +716,6 @@ export const useWebSocketChat = (options: UseWebSocketChatOptions = {}): UseWebS
     },
     [
       addUserMessage,
-      addThinkingStep,
       addErrorCard,
       clearReportContent,
       clearPendingInteraction,

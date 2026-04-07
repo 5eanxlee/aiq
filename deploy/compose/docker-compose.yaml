@@ -40,6 +40,7 @@ services:
     environment:
       - APP_ENV=${APP_ENV:-production}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - PYTHONWARNINGS=${PYTHONWARNINGS:-ignore}
       # Database config (with Docker defaults)
       - NAT_JOB_STORE_DB_URL=${NAT_JOB_STORE_DB_URL:-postgresql+asyncpg://aiq:aiq_dev@postgres:5432/aiq_jobs}
       - AIQ_CHECKPOINT_DB=${AIQ_CHECKPOINT_DB:-postgresql://aiq:aiq_dev@postgres:5432/aiq_checkpoints}
@@ -49,6 +50,10 @@ services:
       # Server config
       # LlamaIndex (default)
       - CONFIG_FILE=${BACKEND_CONFIG:-/app/configs/config_web_default_llamaindex.yml}
+      # Optional tracing overrides for container-to-host Phoenix.
+      # If unset, the backend uses whatever is provided via env_file/default config.
+      - PHOENIX_COLLECTOR_ENDPOINT=${PHOENIX_COLLECTOR_ENDPOINT:-}
+      - PHOENIX_PROJECT=${PHOENIX_PROJECT:-}
       - HOST=0.0.0.0
       - PORT=8000
       # RAG config
@@ -59,11 +64,14 @@ services:
       - DASK_NTHREADS=${DASK_NTHREADS:-4}
     ports:
       - "${PORT:-8000}:8000"
+      - "${DASK_DASHBOARD_PORT:-8787}:8787"
     volumes:
       - ../../configs:/app/configs:ro
       - aiq-data:/app/data
     networks:
       - aiq-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
@@ -106,7 +114,7 @@ services:
       POSTGRES_PASSWORD: aiq_dev
       POSTGRES_DB: aiq_jobs
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro

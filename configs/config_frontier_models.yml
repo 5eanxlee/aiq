@@ -31,7 +31,7 @@ general:
     # Environment overrides:
     # - NAT_JOB_STORE_DB_URL (direct override)
     # - NAT_JOB_STORE_DB_URL_DEV / NAT_JOB_STORE_DB_URL_PROD (via NAT_ENV)
-    db_url: ${NAT_JOB_STORE_DB_URL:-sqlite+aiosqlite:///./jobs.db}
+    db_url: ${NAT_JOB_STORE_DB_URL:-sqlite+aiosqlite:///./var/jobs.db}
     # Job expiry - how long completed jobs stay in database before cleanup
     expiry_seconds: 86400  # 24 hours (min: 600, max: 604800/7 days)
     cors:
@@ -108,7 +108,7 @@ functions:
 
   advanced_web_search_tool:
     _type: tavily_web_search
-    max_results: 2
+    max_results: 4
     advanced_search: true
 
   # Knowledge Retrieval (see sources/knowledge_layer/KNOWLEDGE-LAYER-SETUP.md)
@@ -118,16 +118,21 @@ functions:
     collection_name: ${COLLECTION_NAME:-test_collection}
     generate_summary: true
     summary_model: summary_llm                     # Required when generate_summary: true
-    summary_db: ${AIQ_SUMMARY_DB:-sqlite+aiosqlite:///./summaries.db}
-    top_k: 5
+    summary_db: ${AIQ_SUMMARY_DB:-sqlite+aiosqlite:///./var/summaries.db}
+    top_k: 8
     chroma_dir: ${AIQ_CHROMA_DIR:-/tmp/chroma_data}
 
-  # Paper Search (optional - requires SERPER_API_KEY)
-  # Uncomment the block below and set SERPER_API_KEY to enable academic paper search.
+  # Paper Search (optional)
+  # Uncomment one backend block below to enable academic paper search.
   # paper_search_tool:
   #   _type: paper_search
   #   max_results: 5
   #   serper_api_key: ${SERPER_API_KEY}
+  #
+  # paper_search_tool:
+  #   _type: semantic_scholar_search
+  #   max_results: 5
+  #   semantic_scholar_api_key: ${SEMANTIC_SCHOLAR_API_KEY}
 
   intent_classifier:
     _type: intent_classifier
@@ -135,7 +140,7 @@ functions:
     verbose: true
     tools:
       - web_search_tool
-      # - paper_search_tool  # Uncomment if SERPER_API_KEY is set
+      # - paper_search_tool  # Uncomment if a paper-search backend is configured
       - knowledge_search
 
   clarifier_agent:
@@ -168,7 +173,7 @@ functions:
     max_loops: 2
     verbose: true
     tools:
-      # - paper_search_tool  # Uncomment if SERPER_API_KEY is set
+      # - paper_search_tool  # Uncomment if a paper-search backend is configured
       - advanced_web_search_tool
       - knowledge_search
 
@@ -179,4 +184,4 @@ workflow:
   enable_escalation: true
   enable_clarifier: true
   use_async_deep_research: true
-  checkpoint_db: ${AIQ_CHECKPOINT_DB:-./checkpoints.db}
+  checkpoint_db: ${AIQ_CHECKPOINT_DB:-./var/checkpoints.db}

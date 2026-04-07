@@ -12,13 +12,14 @@
 
 'use client'
 
-import { type FC, type ReactNode, useCallback, useRef, useEffect } from 'react'
+import { type FC, type ReactNode, useCallback, useRef, useEffect, useState } from 'react'
 import { Flex, Button, SegmentedControl, Spinner, Text } from '@/adapters/ui'
-import { Close, Generate, StopCircle } from '@/adapters/ui/icons'
+import { Close, Generate, StopCircle, Clock } from '@/adapters/ui/icons'
 import { cancelJob } from '@/adapters/api'
 import { useChatStore, useLoadJobData } from '@/features/chat'
 import { useAuth } from '@/adapters/auth'
 import { useReducedMotion } from '@/hooks/use-reduced-motion'
+import { formatDuration } from '@/shared/utils/format-duration'
 import { useLayoutStore } from '../store'
 import { PlanTab } from './PlanTab'
 import { TasksTab } from './TasksTab'
@@ -50,6 +51,8 @@ export const ResearchPanel: FC<ResearchPanelProps> = ({ children, isAuthenticate
   const isDeepResearchStreaming = useChatStore((state) => state.isDeepResearchStreaming)
   const deepResearchJobId = useChatStore((state) => state.deepResearchJobId)
   const deepResearchStreamLoaded = useChatStore((state) => state.deepResearchStreamLoaded)
+  const deepResearchStartedAtMs = useChatStore((state) => state.deepResearchStartedAtMs)
+  const deepResearchDurationMs = useChatStore((state) => state.deepResearchDurationMs)
   const { importStreamOnly, isLoading: isStreamLoading } = useLoadJobData()
   const { idToken } = useAuth()
 
@@ -57,6 +60,29 @@ export const ResearchPanel: FC<ResearchPanelProps> = ({ children, isAuthenticate
 
   const isOpen = rightPanel === 'research'
   const cancelFallbackRef = useRef<NodeJS.Timeout | null>(null)
+  const [nowMs, setNowMs] = useState(() => Date.now())
+
+  useEffect(() => {
+    if (!isDeepResearchStreaming || !deepResearchStartedAtMs) {
+      return
+    }
+
+    setNowMs(Date.now())
+    const interval = setInterval(() => {
+      setNowMs(Date.now())
+    }, 1000)
+
+    return () => {
+      clearInterval(interval)
+    }
+  }, [isDeepResearchStreaming, deepResearchStartedAtMs])
+
+  const displayedDurationMs =
+    isDeepResearchStreaming && deepResearchStartedAtMs
+      ? Math.max(nowMs - deepResearchStartedAtMs, 0)
+      : deepResearchDurationMs
+  const showDuration = displayedDurationMs !== null && displayedDurationMs !== undefined
+  const durationLabel = showDuration ? formatDuration(displayedDurationMs ?? 0) : null
 
   // Clean up cancel fallback timer on unmount
   useEffect(() => {
@@ -96,6 +122,11 @@ export const ResearchPanel: FC<ResearchPanelProps> = ({ children, isAuthenticate
         const ownerConvId = state.deepResearchOwnerConversationId
         const messageId = state.activeDeepResearchMessageId
         const hasReport = Boolean(state.reportContent?.trim())
+        const completedAtMs = Date.now()
+        const durationMs =
+          state.deepResearchStartedAtMs !== null
+            ? Math.max(completedAtMs - state.deepResearchStartedAtMs, 0)
+            : undefined
         if (ownerConvId && messageId) {
           state.patchConversationMessage(ownerConvId, messageId, {
             content: '',
@@ -104,7 +135,11 @@ export const ResearchPanel: FC<ResearchPanelProps> = ({ children, isAuthenticate
             showViewReport: hasReport,
           })
         }
-        state.addDeepResearchBanner('cancelled', cancelledJobId, ownerConvId || undefined)
+        state.finalizeDeepResearchRun(completedAtMs)
+        state.addDeepResearchBanner('cancelled', cancelledJobId, ownerConvId || undefined, {
+          durationMs,
+        })
+        state.setStreamLoaded(true)
         state.completeDeepResearch()
         state.setStreaming(false)
       }, CANCEL_FALLBACK_TIMEOUT_MS)
@@ -232,6 +267,14 @@ export const ResearchPanel: FC<ResearchPanelProps> = ({ children, isAuthenticate
                 { value: 'report', children: 'Report' },
               ]}
             />
+            {showDuration && (
+              <Flex align="center" gap="2">
+                <Clock className="h-4 w-4 text-subtle" />
+                <Text kind="body/regular/xs" className="text-subtle">
+                  {isDeepResearchStreaming ? 'Elapsed' : 'Duration'} {durationLabel}
+                </Text>
+              </Flex>
+            )}
             {/* Stop Researching button - always visible, disabled when not streaming */}
             <Button
               kind="tertiary"

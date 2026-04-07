@@ -1,0 +1,1 @@
+<svg fill="none" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><symbol id="lock-closed" viewBox="0 0 16 16"><path fill="currentColor" d="M5,5c0,-1.65685 1.34315,-3 3,-3c1.65685,0 3,1.34315 3,3v2h1v7h-8v-7h1zM5,8v5h6v-5zM10,5c0,-1.10457 -0.89543,-2 -2,-2c-1.10457,0 -2,0.89543 -2,2v2h4z"/></symbol><use href="#lock-closed"/></svg>

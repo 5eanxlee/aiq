@@ -13,7 +13,7 @@
 
 'use client'
 
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSession as useNextAuthSession, signIn, signOut } from 'next-auth/react'
 import { useAppConfig } from '@/shared/context'
 import { type AuthContext } from './types'
@@ -53,11 +53,11 @@ const DEFAULT_USER = {
  */
 export const useAuth = (): AuthContext => {
   const { authRequired, authProviderId, sessionRefreshIntervalSeconds } = useAppConfig()
-  const authRequiredRef = useRef(authRequired)
+  const [initialAuthRequired] = useState(authRequired)
   const { data: session, status, update } = useNextAuthSession()
   const hasTriggeredReauth = useRef(false)
 
-  if (authRequiredRef.current !== authRequired) {
+  if (initialAuthRequired !== authRequired) {
     throw new Error('Auth configuration changed at runtime')
   }
 

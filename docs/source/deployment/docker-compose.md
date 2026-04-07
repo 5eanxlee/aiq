@@ -94,7 +94,7 @@ These are the default values used by the compose stack when the variables are un
 ```bash
 NAT_JOB_STORE_DB_URL=sqlite+aiosqlite:///./data/jobs.db
 AIQ_CHECKPOINT_DB=/app/data/checkpoints.db
-# AIQ_SUMMARY_DB defaults to sqlite+aiosqlite:///./summaries.db
+AIQ_SUMMARY_DB=sqlite+aiosqlite:///./data/summaries.db
 ```
 
 When using SQLite, you can optionally remove the `depends_on` block for the `aiq-agent` service since the `postgres` container is no longer needed.

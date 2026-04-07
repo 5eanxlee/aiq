@@ -12,7 +12,7 @@ Developer workflow for code contributions is as follows:
 1. Developers must first [fork](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/fork-a-repo) the upstream this repository.
 2. Git clone the forked repository and push changes to the personal fork.
 3. Once the code changes are staged on the fork and ready for review, a Pull Request (PR) can be requested to merge the changes from a branch of the fork into a selected branch of upstream.
-4. Since there is no CI/CD process in place yet, the PR will be accepted and the corresponding issue closed only after adequate testing has been completed, manually, by the developer and/or repository owners reviewing the code.
+4. Pull requests are validated with the repository's GitHub Actions workflows. Developers should still run the relevant local checks before opening a PR, and maintainers may request additional manual verification when a change affects runtime behaviour, deployment, or external integrations.
 
 
 ## Signing Your Work

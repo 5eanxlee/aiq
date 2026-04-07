@@ -25,7 +25,7 @@ Main development command hub for common tasks.
 | Command | Description |
 |---------|-------------|
 | `test` | Run tests with pytest |
-| `format` | Format code with isort and yapf |
+| `format` | Format code with ruff (imports) and yapf |
 | `lint` | Check code formatting (no changes) |
 | `pre-commit` | Format code and run lint checks |
 | `pylint` | Run pylint static analysis |
@@ -56,7 +56,7 @@ Starts the NAT FastAPI server for deep research with async job support.
 
 ```bash
 ./scripts/start_server_in_debug_mode.sh
-./scripts/start_server_in_debug_mode.sh--port 8080
+./scripts/start_server_in_debug_mode.sh --port 8080
 ./scripts/start_server_in_debug_mode.sh --config_file configs/config_web_frag.yml
 ```
 
@@ -77,6 +77,95 @@ Starts the NAT FastAPI server for deep research with async job support.
 | `http://localhost:8000/v1/jobs/async/agents` | List available agent types |
 | `http://localhost:8000/v1/jobs/async/submit` | Submit async job (POST) |
 | `http://localhost:8000/v1/jobs/async/job/{id}/stream` | SSE stream for job progress |
+
+### `start_local_stack.sh` / `stop_local_stack.sh` / `restart_local_stack.sh` - Fast Local Loop
+
+Starts or stops the local backend + frontend dev stack in the background with pid files and logs.
+This is the quickest way to run, kill, and redeploy during UI/backend iteration.
+
+```bash
+./scripts/start_local_stack.sh
+./scripts/stop_local_stack.sh
+./scripts/restart_local_stack.sh
+```
+
+**Recommended loop:**
+
+```bash
+./scripts/start_local_stack.sh
+./scripts/restart_local_stack.sh    # after backend/proxy/config updates
+./scripts/stop_local_stack.sh --hard
+```
+
+**Defaults:**
+
+| Setting | Value |
+|---------|-------|
+| Backend | `http://localhost:8000` |
+| Frontend | `http://localhost:3005` |
+| Internal Next.js | `http://localhost:3201` |
+| Logs | `var/logs/backend.log`, `var/logs/frontend.log` |
+
+**Options (`start_local_stack.sh`):**
+
+| Option | Description |
+|--------|-------------|
+| `--config_file <path>` | Backend config file |
+| `--backend_port <port>` | Backend port (default: 8000) |
+| `--frontend_port <port>` | Frontend port (default: 3005) |
+| `--next_port <port>` | Internal Next.js port (default: 3201) |
+
+`stop_local_stack.sh --hard` is the reliable cleanup command. It stops the background stack, kills stale AI-Q dev processes from this repo, and brings down the AI-Q Docker Compose stack if it is running.
+
+### `start_visibility_stack.sh` - High-Visibility Mode
+
+Starts the local inspection stack in one command:
+
+- Phoenix trace UI
+- AI-Q backend with `/debug`
+- Next.js web UI
+
+```bash
+./scripts/start_visibility_stack.sh
+./scripts/start_visibility_stack.sh --no-ui
+./scripts/start_visibility_stack.sh --config_file configs/config_web_visibility_llamaindex.yml
+```
+
+**Services:**
+
+| Service | URL |
+|---------|-----|
+| Phoenix | `http://localhost:6006` |
+| Backend | `http://localhost:8000` |
+| Debug Console | `http://localhost:8000/debug` |
+| Frontend | `http://localhost:3000` |
+
+### `start_docker_full_stack.sh` - Full Docker Stack
+
+Starts the production-shaped local stack through Docker Compose using the
+high-capability config by default:
+
+- backend API
+- embedded Dask scheduler + worker
+- PostgreSQL
+- Next.js web UI
+- optional host Phoenix tracing
+
+```bash
+./scripts/start_docker_full_stack.sh
+./scripts/start_docker_full_stack.sh --with-phoenix
+./scripts/start_docker_full_stack.sh --config_file configs/config_web_visibility_llamaindex.yml
+```
+
+**Services:**
+
+| Service | URL |
+|---------|-----|
+| Backend | `http://localhost:8000` |
+| Debug Console | `http://localhost:8000/debug` |
+| Frontend | `http://localhost:3000` |
+| Dask Dashboard | `http://localhost:8787` |
+| Phoenix (optional) | `http://localhost:6006` |
 
 ### `start_e2e.sh` - End-to-End Mode
 

@@ -14,7 +14,7 @@ Common issues and solutions for the AI-Q blueprint.
 | `ModuleNotFoundError: aiq_agent` | Package not installed in editable mode | `uv pip install -e .` |
 | `nat` command not found | Using system `nat` instead of venv | Use `.venv/bin/nat` or activate the venv |
 | NeMo Agent Toolkit plugins not found | Plugins not installed | `uv pip install -e .` to register entry points |
-| Pre-commit hook failures | Missing pre-commit setup | `pre-commit install && pre-commit run --all-files` |
+| Pre-commit hook failures | Missing pre-commit setup or notebook tooling | `uv sync --dev --extra docs && pre-commit install --hook-type pre-commit --hook-type pre-push && pre-commit run --all-files` |
 | `ormsgpack` attribute error | Version conflict with [LangGraph](https://docs.langchain.com/oss/python/langgraph/overview) | `uv pip install "ormsgpack>=1.5.0"` |
 
 ## API Key Issues

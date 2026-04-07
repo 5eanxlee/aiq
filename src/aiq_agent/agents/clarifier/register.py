@@ -36,6 +36,7 @@ import logging
 from pydantic import Field
 
 from aiq_agent.common import LLMProvider
+from aiq_agent.common import RuntimeLLMTrackerCallback
 from aiq_agent.common import VerboseTraceCallback
 from aiq_agent.common import filter_tools_by_sources
 from aiq_agent.common import is_verbose
@@ -146,7 +147,9 @@ async def clarifier_agent(config: ClarifierConfig, builder: Builder):
     provider.set_default(llm)
 
     verbose = is_verbose(config.verbose)
-    callbacks = [VerboseTraceCallback(log_reasoning=True, max_chars=config.log_response_max_chars)] if verbose else []
+    callbacks = [RuntimeLLMTrackerCallback("clarifier_agent")]
+    if verbose:
+        callbacks.append(VerboseTraceCallback(log_reasoning=True, max_chars=config.log_response_max_chars))
 
     async def user_prompt_callback(question: str) -> str:
         """

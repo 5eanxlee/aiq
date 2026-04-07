@@ -159,7 +159,7 @@ Events streamed during job execution:
 | Mode | Async Jobs | Database | Notes |
 |------|------------|----------|-------|
 | **CLI** (`nat run`) | No | None | Agents run via WebSocket |
-| **Web** (`nat serve`) | Yes | `./jobs.db` (or `front_end.db_url`) | Auto-creates Dask + SQLite |
+| **Web** (`nat serve`) | Yes | `./var/jobs.db` (or `front_end.db_url`) | Auto-creates Dask + SQLite |
 | **Production** | Yes | PostgreSQL | Set `NAT_JOB_STORE_DB_URL` or `front_end.db_url` |
 
 ### NAT Config File
@@ -170,7 +170,7 @@ general:
   front_end:
     _type: aiq_api
     runner_class: aiq_api.plugin.AIQAPIWorker
-    db_url: sqlite+aiosqlite:///./jobs.db   # Job store + event store
+    db_url: sqlite+aiosqlite:///./var/jobs.db   # Job store + event store
     expiry_seconds: 86400
 
 functions:
@@ -185,7 +185,7 @@ functions:
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `NAT_DASK_SCHEDULER_ADDRESS` | Dask scheduler | Auto-created local |
-| `NAT_JOB_STORE_DB_URL` | Job store + event store database | `sqlite+aiosqlite:///./jobs.db` (or via front_end.db_url) |
+| `NAT_JOB_STORE_DB_URL` | Job store + event store database | `sqlite+aiosqlite:///./var/jobs.db` (or via front_end.db_url) |
 
 
 ## Registering New Agents

@@ -400,7 +400,7 @@ general:
   front_end:
     _type: aiq_api
     runner_class: aiq_api.plugin.AIQAPIWorker
-    db_url: ${NAT_JOB_STORE_DB_URL:-sqlite+aiosqlite:///./jobs.db}
+    db_url: ${NAT_JOB_STORE_DB_URL:-sqlite+aiosqlite:///./var/jobs.db}
     expiry_seconds: 86400  # 24 hours
     cors:
       allow_origin_regex: 'http://localhost(:\d+)?'
@@ -414,14 +414,14 @@ general:
 | Mode | Command | Async Jobs | Database | API Available |
 |------|---------|------------|----------|---------------|
 | CLI | `nat run` | No | None | No |
-| Web (local) | `nat serve` | Yes | SQLite (`./jobs.db`) | Yes |
+| Web (local) | `nat serve` | Yes | SQLite (`./var/jobs.db`) | Yes |
 | Production | `nat serve` | Yes | PostgreSQL | Yes |
 
 ### Database Configuration
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
-| `NAT_JOB_STORE_DB_URL` | Job store + event store database | `sqlite+aiosqlite:///./jobs.db` |
+| `NAT_JOB_STORE_DB_URL` | Job store + event store database | `sqlite+aiosqlite:///./var/jobs.db` |
 | `NAT_DASK_SCHEDULER_ADDRESS` | Dask scheduler for distributed execution | Auto-created local cluster |
 
 For production deployments, use PostgreSQL for both the job store and LISTEN/NOTIFY-based real-time SSE:

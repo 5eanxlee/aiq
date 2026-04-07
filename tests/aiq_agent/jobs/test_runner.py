@@ -387,7 +387,7 @@ class TestSubmitDeepResearchJob:
             "os.environ",
             {
                 "NAT_DASK_SCHEDULER_ADDRESS": "tcp://localhost:8786",
-                "NAT_JOB_STORE_DB_URL": "sqlite:///./test.db",
+                "NAT_JOB_STORE_DB_URL": "sqlite:///./var/test.db",
                 "NAT_CONFIG_PATH": "/path/to/config.yml",
             },
         ):
@@ -413,7 +413,7 @@ class TestSubmitDeepResearchJob:
             "os.environ",
             {
                 "NAT_DASK_SCHEDULER_ADDRESS": "tcp://localhost:8786",
-                "NAT_JOB_STORE_DB_URL": "sqlite:///./test.db",
+                "NAT_JOB_STORE_DB_URL": "sqlite:///./var/test.db",
             },
         ):
             with patch("nat.front_ends.fastapi.async_jobs.job_store.JobStore", return_value=mock_job_store):
@@ -575,7 +575,7 @@ class TestEventStore:
 
         EventStore._sync_engine_cache = {"sync-db": (sync_engine, 0)}
         EventStore._async_engine_cache = {"async-db": (async_engine, 0)}
-        EventStore._tables_initialized.add("sqlite:///test.db")
+        EventStore._tables_initialized.add("sqlite:///./var/test.db")
 
         await EventStore.dispose_all_engines_async()
 
@@ -838,7 +838,7 @@ class TestCancellationMonitor:
 
         monitor = CancellationMonitor(
             scheduler_address="tcp://localhost:8786",
-            db_url="sqlite:///test.db",
+            db_url="sqlite:///./var/test.db",
             job_id="test-job",
         )
 
@@ -852,7 +852,7 @@ class TestCancellationMonitor:
 
         monitor = CancellationMonitor(
             scheduler_address="tcp://localhost:8786",
-            db_url="sqlite:///test.db",
+            db_url="sqlite:///./var/test.db",
             job_id="test-job",
         )
 
@@ -866,7 +866,7 @@ class TestCancellationMonitor:
 
         monitor = CancellationMonitor(
             scheduler_address="tcp://localhost:8786",
-            db_url="sqlite:///test.db",
+            db_url="sqlite:///./var/test.db",
             job_id="test-job",
         )
         monitor._cancelled.set()
@@ -880,7 +880,7 @@ class TestCancellationMonitor:
 
         monitor = CancellationMonitor(
             scheduler_address="tcp://localhost:8786",
-            db_url="sqlite:///test.db",
+            db_url="sqlite:///./var/test.db",
             job_id="test-job",
         )
         mock_task = MagicMock()

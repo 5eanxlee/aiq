@@ -99,6 +99,8 @@ export interface DeepResearchBannerData {
   totalTokens?: number
   /** Number of tool calls (for success banner) */
   toolCallCount?: number
+  /** Total runtime for the research job in milliseconds */
+  durationMs?: number
 }
 
 /** Individual chat message */
@@ -176,6 +178,12 @@ export interface ChatMessage {
   deepResearchJobStatus?: DeepResearchJobStatus
   /** Whether this message has active (streaming) deep research - used for UI state */
   isDeepResearchActive?: boolean
+  /** When deep research started, in epoch milliseconds */
+  deepResearchStartedAtMs?: number
+  /** When deep research completed, in epoch milliseconds */
+  deepResearchCompletedAtMs?: number
+  /** Total research duration in milliseconds */
+  deepResearchDurationMs?: number
   /** Data sources that were enabled when this message was sent (for display in thinking panel) */
   enabledDataSources?: string[]
   /** Files that were available when this message was sent (for display in thinking panel) */
@@ -400,6 +408,12 @@ export interface ChatState {
   isDeepResearchStreaming: boolean
   /** Current deep research job status */
   deepResearchStatus: DeepResearchJobStatus | null
+  /** Epoch timestamp when the current deep research run started */
+  deepResearchStartedAtMs: number | null
+  /** Epoch timestamp when the current deep research run completed */
+  deepResearchCompletedAtMs: number | null
+  /** Duration of the current or most recent deep research run in milliseconds */
+  deepResearchDurationMs: number | null
   /** Conversation ID that owns the current deep research stream (for session isolation) */
   deepResearchOwnerConversationId: string | null
   /** Message ID of the originating deep research message (for patching on completion) */
@@ -569,7 +583,7 @@ export interface ChatActions {
     bannerType: DeepResearchBannerType,
     jobId: string,
     conversationId?: string,
-    stats?: { totalTokens?: number; toolCallCount?: number }
+    stats?: { totalTokens?: number; toolCallCount?: number; durationMs?: number }
   ) => void
 
   // Deep research SSE actions
@@ -584,6 +598,8 @@ export interface ChatActions {
   persistDeepResearchToSession: () => void
   /** Complete deep research (clears streaming state, keeps content) */
   completeDeepResearch: () => void
+  /** Finalize timing metadata for the current deep research run */
+  finalizeDeepResearchRun: (completedAtMs?: number) => void
   /** Save current deep research progress to conversation (for session switching) */
   saveDeepResearchProgress: () => void
   /** Reconnect to an in-progress job after page refresh (running/submitted only) */

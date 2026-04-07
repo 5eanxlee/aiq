@@ -57,6 +57,7 @@ from .jobs import get_connection_manager
 from .routes.collections import add_collection_routes
 from .routes.documents import add_document_routes
 from .routes.jobs import register_job_routes
+from .routes.providers import register_provider_routes
 from .websocket_reconnect import install_reconnectable_handler
 
 logger = logging.getLogger(__name__)
@@ -77,7 +78,7 @@ class AIQAPIConfig(FastApiFrontEndConfig, name="aiq_api"):
     """
 
     db_url: str = Field(
-        default="sqlite+aiosqlite:///./jobs.db",
+        default="sqlite+aiosqlite:///./var/jobs.db",
         description="Database URL for job store and event store",
     )
     expiry_seconds: int = Field(
@@ -156,6 +157,12 @@ class AIQAPIWorker(FastApiFrontEndPluginWorker):
     @override
     async def add_routes(self, app: FastAPI, builder: WorkflowBuilder):
         await super().add_routes(app, builder)
+
+        # =====================================================================
+        # Provider readiness routes
+        # =====================================================================
+        await register_provider_routes(app, builder)
+        logger.info("Provider readiness routes registered")
 
         # =====================================================================
         # Async Job API routes

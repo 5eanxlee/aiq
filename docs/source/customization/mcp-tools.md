@@ -118,7 +118,7 @@ general:
   front_end:
     _type: aiq_api
     runner_class: aiq_api.plugin.AIQAPIWorker
-    db_url: ${NAT_JOB_STORE_DB_URL:-sqlite+aiosqlite:///./jobs.db}
+    db_url: ${NAT_JOB_STORE_DB_URL:-sqlite+aiosqlite:///./var/jobs.db}
     expiry_seconds: 86400
     cors:
       allow_origin_regex: 'http://localhost(:\d+)?|http://127.0.0.1(:\d+)?'
@@ -252,7 +252,7 @@ workflow:
   enable_escalation: true
   enable_clarifier: true
   use_async_deep_research: true
-  checkpoint_db: ${AIQ_CHECKPOINT_DB:-./checkpoints.db}
+  checkpoint_db: ${AIQ_CHECKPOINT_DB:-./var/checkpoints.db}
 ```
 
 ## Overriding Tool Names and Descriptions

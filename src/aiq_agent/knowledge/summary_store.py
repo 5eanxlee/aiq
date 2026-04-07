@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
 
@@ -51,6 +52,19 @@ def _normalize_db_url(db_url: str, async_mode: bool = True) -> str:
         base_url = db_url.replace("+aiosqlite", "")
         return base_url.replace("sqlite:///", "sqlite+aiosqlite:///") if async_mode else base_url
     return db_url
+
+
+def _ensure_sqlite_parent_dir(db_url: str) -> None:
+    """Create the parent directory for SQLite file URLs when needed."""
+    if not db_url.startswith("sqlite") or ":memory:" in db_url:
+        return
+
+    base_url = db_url.replace("+aiosqlite", "")
+    if not base_url.startswith("sqlite:///"):
+        return
+
+    db_path = Path(base_url.replace("sqlite:///", "", 1))
+    db_path.parent.mkdir(parents=True, exist_ok=True)
 
 
 class SummaryStore:
@@ -87,6 +101,7 @@ class SummaryStore:
             from sqlalchemy import create_engine
 
             normalized_url = _normalize_db_url(db_url, async_mode=False)
+            _ensure_sqlite_parent_dir(normalized_url)
             is_sqlite = normalized_url.startswith("sqlite")
             connect_args = {"check_same_thread": False, "timeout": 30} if is_sqlite else {}
 
@@ -115,6 +130,7 @@ class SummaryStore:
             from sqlalchemy.ext.asyncio import create_async_engine
 
             normalized_url = _normalize_db_url(db_url, async_mode=True)
+            _ensure_sqlite_parent_dir(normalized_url)
             is_sqlite = normalized_url.startswith("sqlite")
 
             engine = create_async_engine(

@@ -32,6 +32,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import UTC
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
@@ -96,6 +98,8 @@ class JobStatusResponse(BaseModel):
                     "agent_type": "deep_researcher",
                     "error": None,
                     "created_at": "2026-02-12T10:30:00Z",
+                    "updated_at": "2026-02-12T10:30:05Z",
+                    "elapsed_seconds": 5.0,
                 }
             ]
         }
@@ -109,6 +113,11 @@ class JobStatusResponse(BaseModel):
     agent_type: str | None = Field(None, description="Agent type used for this job")
     error: str | None = Field(None, description="Error message if job failed")
     created_at: str | None = Field(None, description="Creation timestamp (ISO format)")
+    updated_at: str | None = Field(None, description="Last update timestamp (ISO format)")
+    elapsed_seconds: float | None = Field(
+        None,
+        description="Elapsed runtime in seconds. For active jobs this is computed up to now; terminal jobs use the last update time.",
+    )
 
 
 class JobStateResponse(BaseModel):
@@ -147,6 +156,12 @@ class DataSource(BaseModel):
     id: str = Field(..., description="Unique identifier for the data source")
     name: str = Field(..., description="Display name")
     description: str | None = Field(default=None, description="Human-readable description")
+    category: str | None = Field(default=None, description="UI grouping category such as web or enterprise.")
+    default_enabled: bool | None = Field(default=None, description="Whether the source should be enabled by default.")
+    requires_auth: bool | None = Field(
+        default=None,
+        description="Whether the frontend should require a signed-in user before enabling this source.",
+    )
 
 
 def _collect_tool_names(builder: WorkflowBuilder) -> set[str]:
@@ -164,6 +179,22 @@ def _collect_tool_names(builder: WorkflowBuilder) -> set[str]:
         for tool in tools:
             tool_names.add(getattr(tool, "name", str(tool)))
     return tool_names
+
+
+def _calculate_elapsed_seconds(job: object) -> float | None:
+    """Calculate elapsed runtime for a job using created/updated timestamps."""
+    created_at = getattr(job, "created_at", None)
+    if created_at is None:
+        return None
+
+    updated_at = getattr(job, "updated_at", None) or created_at
+    if getattr(job, "status", None) in {"submitted", "running"}:
+        updated_at = datetime.now(tz=created_at.tzinfo or UTC)
+
+    try:
+        return max((updated_at - created_at).total_seconds(), 0.0)
+    except TypeError:
+        return None
 
 
 async def register_job_routes(app: FastAPI, builder: WorkflowBuilder, worker: FastApiFrontEndPluginWorker) -> None:
@@ -209,10 +240,28 @@ async def register_job_routes(app: FastAPI, builder: WorkflowBuilder, worker: Fa
                 id="web_search",
                 name="Web Search",
                 description="Search the web for real-time information.",
+                category="web",
+                default_enabled=True,
+                requires_auth=False,
             )
         ]
 
         tool_names = _collect_tool_names(builder)
+
+        paper_search_configured = any(
+            "paper" in name.lower() or "scholar" in name.lower() or "serper" in name.lower() for name in tool_names
+        )
+        if paper_search_configured:
+            data_sources.append(
+                DataSource(
+                    id="paper_search",
+                    name="Paper Search",
+                    description="Search academic papers through the configured paper-search provider.",
+                    category="web",
+                    default_enabled=False,
+                    requires_auth=False,
+                )
+            )
 
         knowledge_configured = any("knowledge" in name.lower() or name == "knowledge_search" for name in tool_names)
         if knowledge_configured:
@@ -221,6 +270,9 @@ async def register_job_routes(app: FastAPI, builder: WorkflowBuilder, worker: Fa
                     id="knowledge_layer",
                     name="Knowledge Base",
                     description="Search uploaded documents and files.",
+                    category="enterprise",
+                    default_enabled=False,
+                    requires_auth=True,
                 )
             )
 
@@ -341,6 +393,7 @@ async def register_job_routes(app: FastAPI, builder: WorkflowBuilder, worker: Fa
             job_id=job_id,
             status=JobStatus.SUBMITTED.value,
             agent_type=req.agent_type,
+            elapsed_seconds=0.0,
         )
 
     @app.get(
@@ -362,6 +415,8 @@ async def register_job_routes(app: FastAPI, builder: WorkflowBuilder, worker: Fa
             status=job.status,
             error=job.error,
             created_at=job.created_at.isoformat() if job.created_at else None,
+            updated_at=job.updated_at.isoformat() if getattr(job, "updated_at", None) else None,
+            elapsed_seconds=_calculate_elapsed_seconds(job),
         )
 
     @app.get(
@@ -633,7 +688,7 @@ def _start_periodic_cleanup(
     try:
         from dask.distributed import fire_and_forget
 
-        from nat.front_ends.fastapi.async_job import periodic_cleanup
+        from nat.front_ends.fastapi.async_jobs.async_job import periodic_cleanup
 
         cleanup_future = job_store.dask_client.submit(
             periodic_cleanup,

@@ -90,9 +90,8 @@ export const useLayoutStore = create<LayoutStore>()(
           const response = await client.getDataSources()
 
           // data_sources is already filtered (knowledge_layer removed) by the client
-          // Only enable web_search by default - user must manually enable other sources
           const enabledIds = response.data_sources
-            .filter((source) => source.id === WEB_SEARCH_SOURCE_ID)
+            .filter((source) => source.default_enabled ?? source.id === WEB_SEARCH_SOURCE_ID)
             .map((source) => source.id)
 
           set(

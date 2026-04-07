@@ -56,7 +56,7 @@ class KnowledgeRetrievalConfig(FunctionBaseConfig, name="knowledge_retrieval"):
         description="Required when generate_summary=true: LLM reference from llms: section",
     )
     summary_db: str = Field(
-        default="sqlite+aiosqlite:///./summaries.db",
+        default="sqlite+aiosqlite:///./var/summaries.db",
         description="Database URL for document summaries (SQLite or PostgreSQL)",
     )
     # LlamaIndex-specific options

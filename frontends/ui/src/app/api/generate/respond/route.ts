@@ -16,11 +16,9 @@
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { isAuthRequired } from '@/adapters/auth/config'
+import { resolveBackendUrl } from '@/adapters/api/backend-url'
 
-const getBackendUrl = (): string => {
-  const url = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
-  return url.replace(/\/$/, '')
-}
+const getBackendUrl = (req: Request): string => resolveBackendUrl(req.headers.get('x-aiq-backend-url'))
 
 export async function POST(req: Request): Promise<Response> {
   try {
@@ -32,7 +30,7 @@ export async function POST(req: Request): Promise<Response> {
     const cookieStore = await cookies()
     const idToken = authRequired ? cookieStore.get('idToken')?.value : null
 
-    const backendUrl = `${getBackendUrl()}/generate/respond`
+    const backendUrl = `${getBackendUrl(req)}/generate/respond`
 
     const response = await fetch(backendUrl, {
       method: 'POST',

@@ -40,10 +40,15 @@ echo ""
 echo "Activating virtual environment..."
 source .venv/bin/activate
 
-# Install core framework with dev dependencies (uses uv.lock to pin versions)
 echo ""
-echo "Installing core framework with dev dependencies..."
-"${UV_BIN}" sync --dev
+echo "Creating runtime data directory..."
+mkdir -p var
+echo "Runtime data will be stored under ./var"
+
+# Install core framework with dev and docs dependencies (uses uv.lock to pin versions)
+echo ""
+echo "Installing core framework with development and docs dependencies..."
+"${UV_BIN}" sync --dev --extra docs
 echo "Core framework installed"
 
 # Install frontends (--no-deps: dependencies already resolved by uv sync)
@@ -66,14 +71,16 @@ echo ""
 echo "Installing data sources..."
 "${UV_BIN}" pip install --no-deps -e ./sources/tavily_web_search
 "${UV_BIN}" pip install --no-deps -e ./sources/google_scholar_paper_search
+"${UV_BIN}" pip install --no-deps -e ./sources/semantic_scholar_search
 "${UV_BIN}" pip install --no-deps -e "./sources/knowledge_layer[llamaindex,foundational_rag]"
 echo "Data Sources installed"
 
 # Setup pre-commit
 echo ""
 echo "Setting up pre-commit hooks..."
-pre-commit install
-echo "Pre-commit hooks installed"
+pre-commit install --hook-type pre-commit --hook-type pre-push
+pre-commit install-hooks
+echo "Pre-commit hooks installed (pre-commit + pre-push)"
 
 # Setup environment file
 echo ""

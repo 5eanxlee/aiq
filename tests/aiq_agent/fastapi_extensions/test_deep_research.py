@@ -112,6 +112,8 @@ class TestJobStatusResponse:
         assert resp.status == "running"
         assert resp.error is None
         assert resp.created_at is None
+        assert resp.updated_at is None
+        assert resp.elapsed_seconds is None
 
     def test_full_response(self):
         """Test full job response."""
@@ -120,12 +122,16 @@ class TestJobStatusResponse:
             status="success",
             error="some error",
             created_at="2026-01-20T10:00:00",
+            updated_at="2026-01-20T10:01:30",
+            elapsed_seconds=90.0,
         )
 
         assert resp.job_id == "123"
         assert resp.status == "success"
         assert resp.error == "some error"
         assert resp.created_at == "2026-01-20T10:00:00"
+        assert resp.updated_at == "2026-01-20T10:01:30"
+        assert resp.elapsed_seconds == 90.0
 
 
 class TestJobStateResponse:
@@ -216,7 +222,7 @@ class TestRegisterRoutes:
         mock_worker._dask_available = True
         mock_worker._job_store = MagicMock()
         mock_worker._scheduler_address = "tcp://localhost:8786"
-        mock_worker._db_url = "sqlite:///./test.db"
+        mock_worker._db_url = "sqlite:///./var/test.db"
         mock_worker._config_file_path = "/path/to/config.yml"
         mock_worker._log_level = 20
         mock_worker._use_dask_threads = False

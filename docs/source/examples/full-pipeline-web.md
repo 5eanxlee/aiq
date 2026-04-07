@@ -44,7 +44,7 @@ general:
 
     # Async job database (JobStore + EventStore)
     # SQLite for local dev, PostgreSQL for production
-    db_url: ${NAT_JOB_STORE_DB_URL:-sqlite+aiosqlite:///./jobs.db}
+    db_url: ${NAT_JOB_STORE_DB_URL:-sqlite+aiosqlite:///./var/jobs.db}
 
     # Completed jobs are cleaned up after this duration
     expiry_seconds: 86400  # 24 hours (range: 600 to 604800)
@@ -206,7 +206,7 @@ workflow:
   enable_escalation: true          # Allow shallow -> deep escalation
   enable_clarifier: true           # Enable clarification flow for deep research
   use_async_deep_research: true    # Run deep research asynchronously
-  checkpoint_db: ${AIQ_CHECKPOINT_DB:-./checkpoints.db}
+  checkpoint_db: ${AIQ_CHECKPOINT_DB:-./var/checkpoints.db}
 ```
 
 ## Required Environment Variables

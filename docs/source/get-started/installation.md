@@ -82,31 +82,31 @@ source .venv/bin/activate
 
 ### 3. Install Dependencies
 
-Install the core package and only the frontends, benchmarks, and data sources you need:
+Install the locked workspace and then add only the frontends, benchmarks, and data sources you need:
 
 ```bash
-# Core with development dependencies
-uv pip install -e ".[dev]"
+# Locked workspace with development and docs tooling
+uv sync --dev --extra docs
 
 # Frontends (pick what you need)
-uv pip install -e ./frontends/cli          # CLI interface
-uv pip install -e ./frontends/debug        # Debug console
-uv pip install -e ./frontends/aiq_api      # Unified API server (includes debug)
+uv pip install --no-deps -e ./frontends/cli          # CLI interface
+uv pip install --no-deps -e ./frontends/debug        # Debug console
+uv pip install --no-deps -e ./frontends/aiq_api      # Unified API server (includes debug)
 
 # Data sources (pick what you need)
-uv pip install -e ./sources/tavily_web_search
-uv pip install -e ./sources/google_scholar_paper_search
-uv pip install -e "./sources/knowledge_layer[llamaindex,foundational_rag]"
+uv pip install --no-deps -e ./sources/tavily_web_search
+uv pip install --no-deps -e ./sources/google_scholar_paper_search
+uv pip install --no-deps -e "./sources/knowledge_layer[llamaindex,foundational_rag]"
 
 # Benchmarks (optional)
-uv pip install -e ./frontends/benchmarks/freshqa
-uv pip install -e ./frontends/benchmarks/deepsearch_qa
+uv pip install --no-deps -e ./frontends/benchmarks/freshqa
+uv pip install --no-deps -e ./frontends/benchmarks/deepsearch_qa
 ```
 
 ### 4. Set Up Pre-Commit Hooks (Development)
 
 ```bash
-pre-commit install
+pre-commit install --hook-type pre-commit --hook-type pre-push
 ```
 
 ## API Key Setup

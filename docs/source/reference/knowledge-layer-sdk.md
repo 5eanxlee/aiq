@@ -1609,14 +1609,14 @@ functions:
     _type: knowledge_retrieval
     generate_summary: true
     summary_model: summary_llm
-    summary_db: ${AIQ_SUMMARY_DB:-sqlite+aiosqlite:///./summaries.db}
+    summary_db: ${AIQ_SUMMARY_DB:-sqlite+aiosqlite:///./var/summaries.db}
 ```
 
 The following drivers are supported:
 
 | Driver | Use Case | Example |
 |--------|----------|---------|
-| SQLite | Local development | `sqlite+aiosqlite:///./summaries.db` |
+| SQLite | Local development | `sqlite+aiosqlite:///./var/summaries.db` |
 | PostgreSQL | Production | `postgresql+psycopg://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:5432/${DB_NAME}` |
 
 The summary store uses SQLAlchemy (`summary_store.py`) and can share the same PostgreSQL instance as the jobs database.

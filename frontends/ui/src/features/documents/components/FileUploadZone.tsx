@@ -10,7 +10,7 @@
 
 'use client'
 
-import { type FC, useCallback, useState, useEffect, useMemo } from 'react'
+import { type FC, useCallback, useMemo } from 'react'
 import { Upload, FormField } from '@/adapters/ui'
 import { useDocumentsStore } from '../store'
 import { useIsCurrentSessionBusy } from '@/features/chat'
@@ -66,26 +66,24 @@ export const FileUploadZone: FC<FileUploadZoneProps> = ({
   )
 
   // Map sessionFiles to KUI Upload value format
-  const [uploadValue, setUploadValue] = useState<UploadedFile[]>([])
-
-  // Sync sessionFiles to uploadValue
-  useEffect(() => {
-    const mapped = sessionFiles
-      .filter((tf) => tf.file) // Only include files with File object (can be displayed in Upload)
-      .map((tf) => ({
-        id: tf.id,
-        file: tf.file!,
-        status:
-          tf.status === 'failed'
-            ? ('error' as const)
-            : tf.status === 'success'
-              ? ('success' as const)
-              : ('uploading' as const),
-        errorMessage: tf.errorMessage ?? undefined,
-        uploadedBytes: tf.progress ? Math.floor((tf.progress / 100) * tf.fileSize) : undefined,
-      }))
-    setUploadValue(mapped)
-  }, [sessionFiles])
+  const uploadValue = useMemo<UploadedFile[]>(
+    () =>
+      sessionFiles
+        .filter((tf) => tf.file) // Only include files with File object (can be displayed in Upload)
+        .map((tf) => ({
+          id: tf.id,
+          file: tf.file!,
+          status:
+            tf.status === 'failed'
+              ? ('error' as const)
+              : tf.status === 'success'
+                ? ('success' as const)
+                : ('uploading' as const),
+          errorMessage: tf.errorMessage ?? undefined,
+          uploadedBytes: tf.progress ? Math.floor((tf.progress / 100) * tf.fileSize) : undefined,
+        })),
+    [sessionFiles]
+  )
 
   const handleValueChange = useCallback(
     (files: UploadedFile | UploadedFile[]) => {

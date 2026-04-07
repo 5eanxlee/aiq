@@ -74,6 +74,19 @@ export type {
   DataSourcesResponse,
 } from './data-sources-client'
 
+// Provider Status Client
+export { createProviderStatusClient } from './provider-status-client'
+export type {
+  ProviderStatusClient,
+  ProviderStatusClientOptions,
+  ProviderDashboardFromAPI,
+  ProviderStatusFromAPI,
+  ProviderQuotaFromAPI,
+  RuntimeModelObservationFromAPI,
+  WorkerLLMConfigFromAPI,
+  WorkerStatusFromAPI,
+} from './provider-status-client'
+
 // Documents Schemas
 export {
   DocumentFileStatusSchema,
@@ -115,5 +128,6 @@ export type {
   DeepResearchCallbacks,
   DeepResearchStreamOptions,
   DeepResearchClient,
+  DeepResearchJobStatusResponse,
   JobStateResponse,
 } from './deep-research-client'

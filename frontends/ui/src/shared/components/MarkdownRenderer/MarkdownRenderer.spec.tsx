@@ -136,6 +136,13 @@ Paragraph 2.`} />)
       expect(link).toHaveAttribute('href', 'https://example.com')
     })
 
+    test('renders bracketed citation links as clickable inline citations', () => {
+      render(<MarkdownRenderer content="Finding [[1]](https://example.com/source)." />)
+
+      const link = screen.getByRole('link', { name: '[1]' })
+      expect(link).toHaveAttribute('href', 'https://example.com/source')
+    })
+
     test('external links open in new tab', () => {
       render(<MarkdownRenderer content="[Link](https://example.com)" />)
 

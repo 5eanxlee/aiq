@@ -360,7 +360,7 @@ class TestRunRetryStatePreservation:
     async def test_run_incomplete_report_retry_passes_full_state(self, mock_llm_provider, real_tool):
         """Second ainvoke on retry must receive full state (files, todos), not only messages."""
         incomplete_content = "Short report.\n## Section One\nText."
-        complete_content = "A" * 1600 + "\n## Intro\n\n## Methods\n\n## Results\n\n## Sources\n[1] http://example.com"
+        complete_content = "A" * 6000 + "\n## Intro\n\n## Methods\n\n## Results\n\n## Sources\n[1] http://example.com"
 
         first_result = {
             "messages": [
@@ -423,7 +423,7 @@ class TestRunRetryStatePreservation:
     async def test_run_incomplete_report_retry_appends_feedback_message(self, mock_llm_provider, real_tool):
         """Retry must append a HumanMessage with feedback; previous messages preserved."""
         short_content = "Brief."
-        full_content = "X" * 1600 + "\n## A\n\n## B\n\n## Sources\n[1] https://a.com"
+        full_content = "X" * 6000 + "\n## A\n\n## B\n\n## Sources\n[1] https://a.com"
 
         first_result = {"messages": [HumanMessage(content="Q"), AIMessage(content=short_content)]}
         second_result = {
@@ -504,7 +504,7 @@ class TestIsReportComplete:
             from aiq_agent.agents.deep_researcher.agent import DeepResearcherAgent
 
             agent = DeepResearcherAgent(llm_provider=mock_llm_provider, tools=[real_tool])
-            content = "A" * 1600 + "\n## Introduction\n\n## Methods\n\n## Sources\n[1] http://x.com"
+            content = "A" * 6000 + "\n## Introduction\n\n## Methods\n\n## Sources\n[1] http://x.com"
             result = {"messages": [AIMessage(content=content)]}
             is_complete, reason = agent._is_report_complete(result)
             assert is_complete is True
@@ -533,7 +533,7 @@ class TestIsReportComplete:
             from aiq_agent.agents.deep_researcher.agent import DeepResearcherAgent
 
             agent = DeepResearcherAgent(llm_provider=mock_llm_provider, tools=[real_tool])
-            content = "A" * 1600 + "\n## Intro\n\n## Body\n\nNo sources here."
+            content = "A" * 6000 + "\n## Intro\n\n## Body\n\nNo sources here."
             result = {"messages": [AIMessage(content=content)]}
             is_complete, reason = agent._is_report_complete(result)
             assert is_complete is False
@@ -562,7 +562,7 @@ class TestIsReportComplete:
             from aiq_agent.agents.deep_researcher.agent import DeepResearcherAgent
 
             agent = DeepResearcherAgent(llm_provider=mock_llm_provider, tools=[real_tool])
-            report_content = "A" * 1600 + "\n## Introduction\n\n## Methods\n\n## Sources\n[1] http://x.com"
+            report_content = "A" * 6000 + "\n## Introduction\n\n## Methods\n\n## Sources\n[1] http://x.com"
             # AIMessage with empty text but report in write_file tool call
             msg = AIMessage(
                 content="",

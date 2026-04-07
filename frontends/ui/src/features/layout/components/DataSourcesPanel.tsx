@@ -35,9 +35,7 @@ interface DataSourcesPanelProps {
  */
 export const DataSourcesPanel: FC<DataSourcesPanelProps> = ({ onSourceToggle, onDeleteFile }) => {
   const { idToken, authRequired } = useAuth()
-  const saveDataSourcesToConversation = useChatStore(
-    (state) => state.saveDataSourcesToConversation
-  )
+  const saveDataSourcesToConversation = useChatStore((state) => state.saveDataSourcesToConversation)
 
   const {
     rightPanel,
@@ -75,13 +73,14 @@ export const DataSourcesPanel: FC<DataSourcesPanelProps> = ({ onSourceToggle, on
       name: source.name,
       description: source.description ?? '',
       category: source.category ?? 'enterprise',
-      defaultEnabled: true,
+      defaultEnabled: source.default_enabled ?? source.id === WEB_SEARCH_SOURCE_ID,
+      requiresAuth: source.requires_auth ?? false,
     }))
   }, [availableDataSources])
 
-  // Check if there are authenticated sources (sources other than web_search that require auth)
+  // Check if any configured sources require user authentication in the UI
   const hasAuthenticatedSources = useMemo(() => {
-    return displaySources.some((source) => source.id !== WEB_SEARCH_SOURCE_ID)
+    return displaySources.some((source) => source.requiresAuth)
   }, [displaySources])
 
   const handleOpenChange = useCallback(
@@ -123,11 +122,9 @@ export const DataSourcesPanel: FC<DataSourcesPanelProps> = ({ onSourceToggle, on
     [setDataSourcesPanelTab]
   )
 
-  // Get only available sources (web_search always available, other sources need auth)
+  // Get only sources available to the current auth state
   const availableSources = useMemo(() => {
-    return displaySources.filter(
-      (source) => source.id === WEB_SEARCH_SOURCE_ID || hasValidToken
-    )
+    return displaySources.filter((source) => !source.requiresAuth || hasValidToken)
   }, [displaySources, hasValidToken])
 
   // Count enabled sources from the store (only count available ones)
@@ -169,7 +166,7 @@ export const DataSourcesPanel: FC<DataSourcesPanelProps> = ({ onSourceToggle, on
             connections will be available to the AI assistant.
           </Text>
         ) : (
-          <Text kind="body/regular/xs" className="text-left text-subtle">
+          <Text kind="body/regular/xs" className="text-subtle text-left">
             Attached files will be always available to agents until deleted.
           </Text>
         )
@@ -223,7 +220,7 @@ export const DataSourcesPanel: FC<DataSourcesPanelProps> = ({ onSourceToggle, on
               }
             }}
             className={`border-base mb-4 rounded-lg border p-3 transition-colors ${
-              isBusy ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:bg-surface-raised-50'
+              isBusy ? 'cursor-not-allowed opacity-50' : 'hover:bg-surface-raised-50 cursor-pointer'
             }`}
             aria-pressed={allAvailableEnabled}
             aria-disabled={isBusy}
@@ -235,9 +232,8 @@ export const DataSourcesPanel: FC<DataSourcesPanelProps> = ({ onSourceToggle, on
             title={isBusy ? 'Data source changes disabled during active operations' : undefined}
           >
             <Text kind="label/semibold/sm" className="text-primary">
-            Disable / Enable All
+              Disable / Enable All
             </Text>
-            {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
             <div onClick={(e) => e.stopPropagation()}>
               <Switch
                 size="small"
@@ -290,9 +286,7 @@ export const DataSourcesPanel: FC<DataSourcesPanelProps> = ({ onSourceToggle, on
           ) : (
             <Flex direction="col" gap="2">
               {displaySources.map((source) => {
-                // Authenticated sources require sign-in - web_search works without auth
-                const isAuthenticatedSource = source.id !== WEB_SEARCH_SOURCE_ID
-                const isSourceAvailable = !isAuthenticatedSource || hasValidToken
+                const isSourceAvailable = !source.requiresAuth || hasValidToken
                 return (
                   <DataConnectionCard
                     key={source.id}

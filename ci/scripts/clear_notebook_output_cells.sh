@@ -24,7 +24,7 @@ cd "$REPO_ROOT"
 clear_one() {
     local f="$1"
     [ -n "$f" ] || return 0
-    jupyter nbconvert --clear-output --inplace "$f"
+    python -m nbconvert --clear-output --inplace "$f"
     git add "$f"
 }
 

@@ -13,7 +13,7 @@
 
 'use client'
 
-import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useRef } from 'react'
 import { SessionProvider } from 'next-auth/react'
 import { ThemeProvider } from '@/adapters/ui'
 import { AppConfigProvider, type AppConfig } from '@/shared/context'
@@ -30,20 +30,9 @@ interface ProvidersProps {
 /**
  * Applies theme classes directly to the document element.
  * This ensures theme changes happen without remounting the component tree.
- * Defers application until after hydration to prevent SSR mismatches.
  */
 const useThemeEffect = (theme: ThemeMode): void => {
-  const [mounted, setMounted] = useState(false)
-
-  // Mark as mounted after first render (client-side only)
   useEffect(() => {
-    setMounted(true)
-  }, [])
-
-  useEffect(() => {
-    // Skip during SSR and initial hydration
-    if (!mounted) return
-
     const root = document.documentElement
 
     // Remove existing theme classes
@@ -66,7 +55,7 @@ const useThemeEffect = (theme: ThemeMode): void => {
       // Apply explicit theme
       root.classList.add(theme === 'dark' ? 'nv-dark' : 'nv-light')
     }
-  }, [theme, mounted])
+  }, [theme])
 }
 
 /**
@@ -90,7 +79,7 @@ const useDataSourcesInit = (): void => {
  * Restores per-session data source toggles after the initial API fetch.
  * On page refresh, fetchDataSources sets enabledDataSourceIds to [web_search].
  * This hook overrides that default with the stored per-session selection.
- * Waits for both availableDataSources and a hydrated conversation before restoring.
+ * Waits for both availableDataSources and a restored conversation before restoring.
  */
 const useDataSourceSessionRestore = (): void => {
   const availableDataSources = useLayoutStore((state) => state.availableDataSources)
@@ -146,25 +135,27 @@ const ThemeWrapper = ({ children }: { children: ReactNode }): ReactNode => {
  * Completed jobs are loaded on-demand via "View Report" click.
  */
 const DeepResearchRestorer = ({ children }: { children: ReactNode }): ReactNode => {
-  const [mounted, setMounted] = useState(false)
   const reconnectToActiveJob = useChatStore((state) => state.reconnectToActiveJob)
-  const cleanupOrphanedStartingBanners = useChatStore((state) => state.cleanupOrphanedStartingBanners)
+  const cleanupOrphanedStartingBanners = useChatStore(
+    (state) => state.cleanupOrphanedStartingBanners
+  )
   const currentConversationId = useChatStore((state) => state.currentConversation?.id)
   const isDeepResearchStreaming = useChatStore((state) => state.isDeepResearchStreaming)
 
   useEffect(() => {
-    setMounted(true)
-  }, [])
-
-  useEffect(() => {
-    if (!mounted || !currentConversationId || isDeepResearchStreaming) return
+    if (!currentConversationId || isDeepResearchStreaming) return
 
     const restore = async () => {
       await reconnectToActiveJob()
       await cleanupOrphanedStartingBanners()
     }
-    restore()
-  }, [mounted, currentConversationId, isDeepResearchStreaming, reconnectToActiveJob, cleanupOrphanedStartingBanners])
+    void restore()
+  }, [
+    currentConversationId,
+    isDeepResearchStreaming,
+    reconnectToActiveJob,
+    cleanupOrphanedStartingBanners,
+  ])
 
   return <>{children}</>
 }

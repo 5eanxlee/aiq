@@ -10,15 +10,13 @@
  */
 
 import { NextResponse } from 'next/server'
+import { resolveBackendUrl } from '@/adapters/api/backend-url'
 
-const getBackendUrl = (): string => {
-  const url = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
-  return url.replace(/\/$/, '')
-}
+const getBackendUrl = (req: Request): string => resolveBackendUrl(req.headers.get('x-aiq-backend-url'))
 
-export async function GET(): Promise<Response> {
+export async function GET(req: Request): Promise<Response> {
   try {
-    const response = await fetch(`${getBackendUrl()}/health`, {
+    const response = await fetch(`${getBackendUrl(req)}/health`, {
       method: 'GET',
       signal: AbortSignal.timeout(5000),
     })

@@ -150,6 +150,37 @@ class TestFilterToolsBySourcesWebSearch:
         assert tavily_tool in result
 
 
+class TestFilterToolsBySourcesPaperSearch:
+    """Tests for filtering paper search tools."""
+
+    def test_filter_paper_search_includes_paper_tools(self):
+        """Test that paper_search includes Serper/Scholar tools."""
+        paper_tool = MagicMock()
+        paper_tool.name = "paper_search_tool"
+        web_tool = MagicMock()
+        web_tool.name = "tavily_search"
+
+        result = filter_tools_by_sources([paper_tool, web_tool], ["paper_search"])
+        assert paper_tool in result
+        assert web_tool not in result
+
+    def test_filter_paper_search_includes_serper_tools(self):
+        """Test that paper_search includes tools with serper in the name."""
+        serper_tool = MagicMock()
+        serper_tool.name = "serper_scholar"
+
+        result = filter_tools_by_sources([serper_tool], ["paper_search"])
+        assert serper_tool in result
+
+    def test_filter_paper_search_includes_semantic_scholar_tools(self):
+        """Test that paper_search includes Semantic Scholar tools."""
+        semantic_tool = MagicMock()
+        semantic_tool.name = "semantic_scholar_search_tool"
+
+        result = filter_tools_by_sources([semantic_tool], ["paper_search"])
+        assert semantic_tool in result
+
+
 class TestFilterToolsBySourcesKnowledgeLayer:
     """Tests for filtering knowledge layer tools."""
 
@@ -306,6 +337,14 @@ class TestFormatDataSourceTools:
         assert result[0]["name"] == "knowledge_search"
         assert "document" in result[0]["description"].lower() or "file" in result[0]["description"].lower()
 
+    def test_format_paper_search_source(self):
+        """Test formatting paper_search data source."""
+        result = format_data_source_tools(["paper_search"])
+
+        assert len(result) == 1
+        assert result[0]["name"] == "paper_search"
+        assert "paper" in result[0]["description"].lower() or "scholar" in result[0]["description"].lower()
+
     def test_format_non_web_source_as_knowledge(self):
         """Test that non-web sources (e.g. confluence) map to knowledge_search."""
         result = format_data_source_tools(["confluence"])
@@ -316,11 +355,12 @@ class TestFormatDataSourceTools:
 
     def test_format_multiple_sources(self):
         """Test formatting multiple data sources (web_search and others map to knowledge_search)."""
-        result = format_data_source_tools(["web_search", "sharepoint"])
+        result = format_data_source_tools(["web_search", "paper_search", "sharepoint"])
 
-        assert len(result) == 2
+        assert len(result) == 3
         names = [r["name"] for r in result]
         assert "web_search" in names
+        assert "paper_search" in names
         assert "knowledge_search" in names
 
     def test_format_multiple_sources_with_knowledge_layer(self):

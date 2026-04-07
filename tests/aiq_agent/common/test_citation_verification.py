@@ -665,14 +665,17 @@ class TestSanitizeReport:
         )
         result = sanitize_report(report)
         # Body URL replaced with citation number
-        assert "Visit [1] for the paper [1]" in result.sanitized_report
+        assert (
+            "Visit [[1]](https://arxiv.org/abs/1706.03762) for the paper "
+            "[[1]](https://arxiv.org/abs/1706.03762)" in result.sanitized_report
+        )
         # Reference section URL preserved
         assert "[1] Paper: https://arxiv.org/abs/1706.03762" in result.sanitized_report
         assert result.body_urls_replaced == 1
         assert result.body_urls_removed == 0
 
     def test_markdown_links_collapsed_to_text_in_body(self):
-        """Markdown hyperlinks [text](url) should be collapsed to display text."""
+        """Markdown hyperlinks in body prose should collapse before verified relinking."""
         report = (
             "Read the [NVIDIA docs](https://nvidia.com/docs/guide) for details [1].\n\n"
             "## Sources\n"
@@ -681,6 +684,7 @@ class TestSanitizeReport:
         result = sanitize_report(report)
         assert "NVIDIA docs" in result.sanitized_report
         assert "https://nvidia.com/docs/guide" not in result.sanitized_report
+        assert "[[1]](https://example.com/article)" in result.sanitized_report
 
     def test_body_without_urls_unchanged(self):
         report = (
@@ -691,7 +695,8 @@ class TestSanitizeReport:
         )
         result = sanitize_report(report)
         assert result.body_urls_removed == 0
-        assert "Finding [1]" in result.sanitized_report
+        assert "Finding [[1]](https://example.com/article)" in result.sanitized_report
+        assert "Another finding [[2]](https://other.com/page)" in result.sanitized_report
 
     def test_shortened_url_removed_from_references(self):
         report = "Finding [1].\n\n## Sources\n[1] Article: https://bit.ly/abc123"
@@ -779,8 +784,8 @@ class TestSanitizeReport:
             "[3] Article 2: https://valid.com/article2"
         )
         result = sanitize_report(report)
-        assert "A [1]" in result.sanitized_report
-        assert "C [2]" in result.sanitized_report
+        assert "A [[1]](https://valid.com/article1)" in result.sanitized_report
+        assert "C [[2]](https://valid.com/article2)" in result.sanitized_report
         assert "[3]" not in result.sanitized_report
 
     def test_full_pipeline_verify_then_sanitize(self):
@@ -797,8 +802,8 @@ class TestSanitizeReport:
         )
         verified = verify_citations(report, registry).verified_report
         sanitized = sanitize_report(verified).sanitized_report
-        assert "A [1]" in sanitized
-        assert "C [2]" in sanitized
+        assert "A [[1]](https://valid.com/article1)" in sanitized
+        assert "C [[2]](https://valid.com/article2)" in sanitized
         assert "[3]" not in sanitized
 
     def test_mixed_issues(self):
@@ -826,10 +831,25 @@ class TestSanitizeReport:
         )
         result = sanitize_report(report)
         # Matching URL replaced with [1], unknown URL stripped
-        assert "See [1] and for details [1]" in result.sanitized_report
+        assert (
+            "See [[1]](https://arxiv.org/abs/paper) and for details [[1]](https://arxiv.org/abs/paper)"
+            in result.sanitized_report
+        )
         assert "https://unknown.com" not in result.sanitized_report
         assert result.body_urls_replaced == 1
         assert result.body_urls_removed == 1
+
+    def test_inline_citations_are_linkified_from_verified_sources(self):
+        """Verified inline citations should become clickable markdown links."""
+        report = (
+            "Alpha is notable [1], while Beta is useful [2].\n\n"
+            "## Sources\n"
+            "[1] Alpha: https://example.com/alpha\n"
+            "[2] Beta: https://example.com/beta"
+        )
+        result = sanitize_report(report)
+        assert "[[1]](https://example.com/alpha)" in result.sanitized_report
+        assert "[[2]](https://example.com/beta)" in result.sanitized_report
 
 
 # ---------------------------------------------------------------------------

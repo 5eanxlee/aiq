@@ -300,7 +300,7 @@ functions:
     _type: knowledge_retrieval
     generate_summary: true
     summary_model: summary_llm   # Required when generate_summary: true
-    summary_db: sqlite+aiosqlite:///./summaries.db  # Optional: defaults to SQLite
+    summary_db: sqlite+aiosqlite:///./var/summaries.db  # Optional: defaults to SQLite
 ```
 
 ### Supported File Types
@@ -374,7 +374,7 @@ functions:
   knowledge_search:
     _type: knowledge_retrieval
     generate_summary: true
-    summary_db: ${AIQ_SUMMARY_DB:-sqlite+aiosqlite:///./summaries.db}  # Default: SQLite
+    summary_db: ${AIQ_SUMMARY_DB:-sqlite+aiosqlite:///./var/summaries.db}  # Default: SQLite
 ```
 
 For production deployments, use PostgreSQL:

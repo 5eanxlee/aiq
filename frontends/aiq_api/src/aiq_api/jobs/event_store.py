@@ -25,6 +25,7 @@ import asyncio
 import logging
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -80,6 +81,19 @@ def _normalize_db_url(db_url: str, async_mode: bool = True) -> str:
     return db_url
 
 
+def _ensure_sqlite_parent_dir(db_url: str) -> None:
+    """Create the parent directory for SQLite file URLs when needed."""
+    if not db_url.startswith("sqlite") or ":memory:" in db_url:
+        return
+
+    base_url = db_url.replace("+aiosqlite", "")
+    if not base_url.startswith("sqlite:///"):
+        return
+
+    db_path = Path(base_url.replace("sqlite:///", "", 1))
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+
 class EventStore:
     """
     Event store for real-time SSE streaming using SQLAlchemy.
@@ -101,7 +115,7 @@ class EventStore:
     _cache_lock = threading.Lock()
     _tables_initialized: set[str] = set()
 
-    def __init__(self, db_url: str = "sqlite+aiosqlite:///./jobs.db", job_id: str | None = None):
+    def __init__(self, db_url: str = "sqlite+aiosqlite:///./var/jobs.db", job_id: str | None = None):
         self.db_url = db_url
         self.job_id = job_id
         self._is_postgres = db_url.startswith("postgresql")
@@ -122,6 +136,7 @@ class EventStore:
             from sqlalchemy import create_engine
 
             normalized_url = _normalize_db_url(db_url, async_mode=False)
+            _ensure_sqlite_parent_dir(normalized_url)
             connect_args = {}
             if normalized_url.startswith("sqlite"):
                 connect_args = {"check_same_thread": False, "timeout": 30}
@@ -160,6 +175,7 @@ class EventStore:
             from sqlalchemy.ext.asyncio import create_async_engine
 
             normalized_url = _normalize_db_url(db_url, async_mode=True)
+            _ensure_sqlite_parent_dir(normalized_url)
 
             engine = create_async_engine(
                 normalized_url,

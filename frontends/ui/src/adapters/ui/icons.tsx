@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Icon Adapters - CDN SVG Icons
+ * Icon Adapters - Self-Hosted SVG Icons
  *
- * Renders NVIDIA brand icons via CDN-hosted SVGs using external-svg-loader.
- * The loader script (in layout.tsx <head>) watches for <svg data-src="...">
+ * Renders NVIDIA brand icons from locally hosted SVG assets using
+ * external-svg-loader. The loader watches for <svg data-src="...">
  * elements and inlines the fetched SVG content, preserving our attributes.
  *
  * Icons are client-only to avoid hydration mismatches: external-svg-loader
@@ -31,11 +31,15 @@
 
 'use client'
 
-import { type FC, useState, useEffect } from 'react'
+import { type FC } from 'react'
+import { useHydrated } from '@/hooks/use-hydrated'
 
-/** CDN base URL for NVIDIA brand asset icons (pinned version) */
-const CDN_VERSION = '3.8.0'
-const CDN_BASE = `https://brand-assets.cne.ngc.nvidia.com/assets/icons/${CDN_VERSION}`
+/** Versioned local icon asset path */
+const ICON_ASSET_VERSION = '3.8.0'
+const ICON_BASE = `/vendor/nvidia-icons/${ICON_ASSET_VERSION}`
+
+const getPlaceholderDimension = (dimension: number | string): number | string =>
+  typeof dimension === 'string' && /^\d+(\.\d+)?$/.test(dimension) ? Number(dimension) : dimension
 
 // ---------------------------------------------------------------------------
 // Base icon props
@@ -54,14 +58,17 @@ interface IconProps {
 
 const createIcon = (iconName: string, variant: 'line' | 'fill' = 'line'): FC<IconProps> => {
   const Icon: FC<IconProps> = ({ className, width = 20, height = 20, 'aria-label': ariaLabel }) => {
-    const [mounted, setMounted] = useState(false)
-    useEffect(() => setMounted(true), [])
+    const isHydrated = useHydrated()
 
-    // SSR / pre-mount: invisible placeholder preserving layout dimensions
-    if (!mounted) {
+    // SSR / hydration: invisible placeholder preserving layout dimensions
+    if (!isHydrated) {
       return (
         <span
-          style={{ display: 'inline-block', width: Number(width), height: Number(height) }}
+          style={{
+            display: 'inline-block',
+            width: getPlaceholderDimension(width),
+            height: getPlaceholderDimension(height),
+          }}
           aria-hidden="true"
         />
       )
@@ -69,7 +76,7 @@ const createIcon = (iconName: string, variant: 'line' | 'fill' = 'line'): FC<Ico
 
     return (
       <svg
-        data-src={`${CDN_BASE}/${variant}/${iconName}.svg`}
+        data-src={`${ICON_BASE}/${variant}/${iconName}.svg`}
         width={width}
         height={height}
         fill="currentColor"
@@ -202,12 +209,13 @@ export const ChartFlow = createIcon('chart-flow')
 
 /** Generate icon for research panel toggle */
 export const Generate: FC<IconProps> = ({ className }) => {
-  const [mounted, setMounted] = useState(false)
-  useEffect(() => setMounted(true), [])
-  if (!mounted) return <span style={{ display: 'inline-block', width: 24, height: 24 }} aria-hidden="true" />
+  const isHydrated = useHydrated()
+
+  if (!isHydrated)
+    return <span style={{ display: 'inline-block', width: 24, height: 24 }} aria-hidden="true" />
   return (
     <svg
-      data-src={`${CDN_BASE}/line/generate.svg`}
+      data-src={`${ICON_BASE}/line/generate.svg`}
       width="24"
       height="24"
       fill="#76B900"
@@ -246,15 +254,14 @@ export const LoadingSpinner: FC<LoadingSpinnerProps> = ({
   size = 'small',
   'aria-label': ariaLabel = 'Loading',
 }) => {
-  const [mounted, setMounted] = useState(false)
-  useEffect(() => setMounted(true), [])
+  const isHydrated = useHydrated()
   const sizeClass = size === 'medium' ? 'w-6 h-6' : 'w-4 h-4'
-  if (!mounted) {
+  if (!isHydrated) {
     return <span className={`${sizeClass} inline-block`} aria-label={ariaLabel} role="status" />
   }
   return (
     <svg
-      data-src={`${CDN_BASE}/line/circle-3-q.svg`}
+      data-src={`${ICON_BASE}/line/circle-3-q.svg`}
       fill="currentColor"
       className={`animate-spin ${sizeClass} text-brand ${className ?? ''}`}
       aria-label={ariaLabel}

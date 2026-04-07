@@ -102,7 +102,7 @@ general:
   front_end:
     _type: aiq_api
     runner_class: aiq_api.plugin.AIQAPIWorker
-    db_url: sqlite+aiosqlite:///./jobs.db
+    db_url: sqlite+aiosqlite:///./var/jobs.db
     expiry_seconds: 86400
   telemetry:
     logging:

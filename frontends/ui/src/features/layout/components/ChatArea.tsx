@@ -16,10 +16,19 @@
 
 'use client'
 
-import { type FC, useRef, useEffect, useCallback, useState } from 'react'
+import { type FC, useRef, useEffect, useCallback } from 'react'
 import { Flex, Text, Button } from '@/adapters/ui'
 import { Document, Lock } from '@/adapters/ui/icons'
-import { useChatStore, AgentPrompt, AgentResponse, ErrorBanner, FileUploadBanner, DeepResearchBanner, UserMessage, ChatThinking } from '@/features/chat'
+import {
+  useChatStore,
+  AgentPrompt,
+  AgentResponse,
+  ErrorBanner,
+  FileUploadBanner,
+  DeepResearchBanner,
+  UserMessage,
+  ChatThinking,
+} from '@/features/chat'
 import type { ChatMessage } from '@/features/chat'
 import { StarfieldAnimation } from '@/shared/components/StarfieldAnimation'
 
@@ -35,8 +44,14 @@ interface ChatAreaProps {
  * Shows welcome state when no messages exist.
  */
 export const ChatArea: FC<ChatAreaProps> = ({ isAuthenticated = false, onSignIn }) => {
-  const { currentConversation, respondToPrompt, getThinkingStepsForMessage, isStreaming, currentUserMessageId, dismissErrorCard } =
-    useChatStore()
+  const {
+    currentConversation,
+    respondToPrompt,
+    getThinkingStepsForMessage,
+    isStreaming,
+    currentUserMessageId,
+    dismissErrorCard,
+  } = useChatStore()
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const messages = currentConversation?.messages ?? []
@@ -60,7 +75,7 @@ export const ChatArea: FC<ChatAreaProps> = ({ isAuthenticated = false, onSignIn 
   const isEmpty = displayableMessages.length === 0
 
   // Track previous message count for scroll detection
-  const [prevMessageCount, setPrevMessageCount] = useState(displayableMessages.length)
+  const prevMessageCountRef = useRef(displayableMessages.length)
 
   /**
    * Helper to get thinking steps for a user message.
@@ -83,11 +98,11 @@ export const ChatArea: FC<ChatAreaProps> = ({ isAuthenticated = false, onSignIn 
   // Auto-scroll to bottom only when a new message is added (not on re-renders or panel toggles)
   useEffect(() => {
     const currentCount = displayableMessages.length
-    if (currentCount > prevMessageCount) {
+    if (currentCount > prevMessageCountRef.current) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
     }
-    setPrevMessageCount(currentCount)
-  }, [displayableMessages.length, prevMessageCount])
+    prevMessageCountRef.current = currentCount
+  }, [displayableMessages.length])
 
   const handlePromptRespond = useCallback(
     (promptId: string, response: string) => {
@@ -95,12 +110,6 @@ export const ChatArea: FC<ChatAreaProps> = ({ isAuthenticated = false, onSignIn 
     },
     [respondToPrompt]
   )
-
-  // TODO: Implement file retry/cancel/delete handlers when file upload is added
-  // For now, these are placeholders
-  const handleFileRetry = useCallback((_messageId: string) => {
-    // Will be implemented with file upload feature
-  }, [])
 
   return (
     <Flex
@@ -111,7 +120,7 @@ export const ChatArea: FC<ChatAreaProps> = ({ isAuthenticated = false, onSignIn 
       {isEmpty ? (
         <WelcomeState isAuthenticated={isAuthenticated} onSignIn={onSignIn} />
       ) : (
-        <Flex direction="col" gap="4" className="mx-auto w-full max-w-3xl px-4 pt-4 pb-24">
+        <Flex direction="col" gap="4" className="mx-auto w-full max-w-3xl px-4 pb-24 pt-4">
           {displayableMessages.map((message, index) => {
             const isUserMessage = message.messageType === 'user' || message.role === 'user'
             const messageSteps = isUserMessage ? getStepsForUserMessage(message.id) : []
@@ -128,18 +137,16 @@ export const ChatArea: FC<ChatAreaProps> = ({ isAuthenticated = false, onSignIn 
             // Only evaluate status within this message turn (until next user message).
             // This prevents later turns from overriding interrupted/waiting state.
             const turnMessages =
-              nextUserMessageIndex >= 0
-                ? remaining.slice(0, nextUserMessageIndex)
-                : remaining
+              nextUserMessageIndex >= 0 ? remaining.slice(0, nextUserMessageIndex) : remaining
 
             // Waiting: an unresponded HITL prompt follows this user message
-            const isWaiting = shouldCheckPostState && turnMessages.some((m) =>
-              m.messageType === 'prompt' && !m.isPromptResponded
-            )
+            const isWaiting =
+              shouldCheckPostState &&
+              turnMessages.some((m) => m.messageType === 'prompt' && !m.isPromptResponded)
 
             // Interrupted: no actual response AND not waiting for HITL
-            const hasResponse = turnMessages.some((m) =>
-              m.messageType === 'assistant' || m.messageType === 'agent_response'
+            const hasResponse = turnMessages.some(
+              (m) => m.messageType === 'assistant' || m.messageType === 'agent_response'
             )
             const isInterrupted = shouldCheckPostState && !isWaiting && !hasResponse
 
@@ -149,7 +156,6 @@ export const ChatArea: FC<ChatAreaProps> = ({ isAuthenticated = false, onSignIn 
                 <MessageRenderer
                   message={message}
                   onPromptRespond={handlePromptRespond}
-                  onFileRetry={handleFileRetry}
                   onErrorDismiss={dismissErrorCard}
                 />
 
@@ -184,18 +190,12 @@ export const ChatArea: FC<ChatAreaProps> = ({ isAuthenticated = false, onSignIn 
 interface MessageRendererProps {
   message: ChatMessage
   onPromptRespond: (promptId: string, response: string) => void
-  onFileRetry?: (messageId: string) => void
-  onFileCancel?: (messageId: string) => void
-  onFileDelete?: (messageId: string) => void
   onErrorDismiss?: (messageId: string) => void
 }
 
 const MessageRenderer: FC<MessageRendererProps> = ({
   message,
   onPromptRespond,
-  onFileRetry: _onFileRetry,
-  onFileCancel: _onFileCancel,
-  onFileDelete: _onFileDelete,
   onErrorDismiss,
 }) => {
   const messageType = message.messageType || (message.role === 'user' ? 'user' : 'assistant')
@@ -205,8 +205,6 @@ const MessageRenderer: FC<MessageRendererProps> = ({
       return <UserMessage content={message.content} timestamp={message.timestamp} />
 
     case 'status':
-      // TODO: StatusCard was removed in refactor - implement inline status display
-      // Status messages show agent activity (thinking, searching, planning, etc.)
       if (!message.statusType) {
         return null
       }
@@ -214,7 +212,7 @@ const MessageRenderer: FC<MessageRendererProps> = ({
         <Flex
           align="center"
           gap="2"
-          className="px-4 py-2 rounded-lg bg-surface-raised-30 border border-base"
+          className="bg-surface-raised-30 border-base rounded-lg border px-4 py-2"
           role="status"
         >
           <Text kind="body/regular/sm" className="text-subtle">
@@ -256,8 +254,6 @@ const MessageRenderer: FC<MessageRendererProps> = ({
       )
 
     case 'file':
-      // TODO: FileCard was removed in refactor - file display handled by FileSourceCard in panel
-      // File operation messages show upload/ingest status
       if (!message.fileData) {
         return null
       }
@@ -265,7 +261,7 @@ const MessageRenderer: FC<MessageRendererProps> = ({
         <Flex
           align="center"
           gap="2"
-          className="px-4 py-2 rounded-lg bg-surface-raised-30 border border-base"
+          className="bg-surface-raised-30 border-base rounded-lg border px-4 py-2"
           role="status"
         >
           <Document className="text-subtle h-4 w-4" />
@@ -315,6 +311,7 @@ const MessageRenderer: FC<MessageRendererProps> = ({
           jobId={message.deepResearchBannerData.jobId}
           totalTokens={message.deepResearchBannerData.totalTokens}
           toolCallCount={message.deepResearchBannerData.toolCallCount}
+          durationMs={message.deepResearchBannerData.durationMs}
           timestamp={message.timestamp}
         />
       )
@@ -352,7 +349,7 @@ const WelcomeState: FC<WelcomeStateProps> = ({ isAuthenticated = false, onSignIn
 
         {/* Content */}
         <Flex direction="col" align="center" gap="6" className="relative z-10 max-w-md text-center">
-          <span className="text-6xl text-brand">
+          <span className="text-brand text-6xl">
             <Lock />
           </span>
           <Text kind="title/lg" className="text-primary">
@@ -373,7 +370,6 @@ const WelcomeState: FC<WelcomeStateProps> = ({ isAuthenticated = false, onSignIn
             </Flex>
           </Button>
         </Flex>
-
       </Flex>
     )
   }
@@ -398,7 +394,6 @@ const WelcomeState: FC<WelcomeStateProps> = ({ isAuthenticated = false, onSignIn
           and more.
         </Text>
       </Flex>
-
     </Flex>
   )
 }

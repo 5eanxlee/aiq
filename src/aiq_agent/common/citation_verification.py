@@ -787,6 +787,7 @@ _BARE_URL_RE = re.compile(r"https?://[^\s<>\"',\]]+")
 # Body URL patterns (used by sanitize_report)
 _MD_LINK_RE = re.compile(r"\[([^\]]*)\]\(\s*\w+://[^\s)]+\)")
 _BODY_URL_RE = re.compile(r"\w+://[^\s<>\"',\]]+")
+_INLINE_CITATION_RE = re.compile(r"\[(\d+)\]")
 
 
 @dataclass
@@ -812,6 +813,8 @@ def sanitize_report(report_text: str) -> ReportSanitizationResult:
     3. Remove truncated/garbled URLs — URLs ending in '...' or with no
        path (domain-only like 'https://arxiv.org') are incomplete.
     4. Block unsafe URLs — no IP-address URLs, no non-http schemes.
+    5. Convert verified inline ``[N]`` citations into clickable markdown
+       links using the canonical URLs that remain in the Sources section.
 
     Args:
         report_text: Report text (ideally after verify_citations()).
@@ -955,6 +958,21 @@ def sanitize_report(report_text: str) -> ReportSanitizationResult:
     # Renumber citations to close any gaps (from verify_citations and/or sanitize removals)
     if ref_section:
         cleaned_body, ref_section, _ = _renumber_citations(cleaned_body, ref_section)
+        citation_to_url: dict[int, str] = {}
+        for match in _CITATION_LINE_RE.finditer(ref_section):
+            citation_num = int(match.group(1))
+            url_match = _BARE_URL_RE.search(match.group(2))
+            if url_match:
+                citation_to_url[citation_num] = url_match.group(0).rstrip(".,;)")
+
+        def _linkify_inline_citation(match: re.Match) -> str:
+            citation_num = int(match.group(1))
+            url = citation_to_url.get(citation_num)
+            if not url:
+                return match.group(0)
+            return f"[[{citation_num}]]({url})"
+
+        cleaned_body = _INLINE_CITATION_RE.sub(_linkify_inline_citation, cleaned_body)
 
     sanitized_report = cleaned_body + ref_section
 

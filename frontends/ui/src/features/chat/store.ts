@@ -186,6 +186,9 @@ const initialState: ChatState = {
   deepResearchLastEventId: null,
   isDeepResearchStreaming: false,
   deepResearchStatus: null,
+  deepResearchStartedAtMs: null,
+  deepResearchCompletedAtMs: null,
+  deepResearchDurationMs: null,
   deepResearchOwnerConversationId: null,
   activeDeepResearchMessageId: null,
   deepResearchCitations: [],
@@ -239,7 +242,7 @@ const getDefaultEnabledDataSourceIds = (): string[] => {
   const layoutStore = useLayoutStore.getState()
   return (
     layoutStore.availableDataSources
-      ?.filter((source) => source.id === WEB_SEARCH_SOURCE_ID)
+      ?.filter((source) => source.default_enabled ?? source.id === WEB_SEARCH_SOURCE_ID)
       .map((source) => source.id) ?? []
   )
 }
@@ -314,6 +317,9 @@ export const useChatStore = create<ChatStore>()(
                 deepResearchLastEventId: null,
                 isDeepResearchStreaming: false,
                 deepResearchStatus: null,
+                deepResearchStartedAtMs: null,
+                deepResearchCompletedAtMs: null,
+                deepResearchDurationMs: null,
                 deepResearchOwnerConversationId: null,
                 activeDeepResearchMessageId: null,
                 // Clear HITL pending interaction
@@ -366,6 +372,9 @@ export const useChatStore = create<ChatStore>()(
               deepResearchLastEventId: null,
               isDeepResearchStreaming: false,
               deepResearchStatus: null,
+              deepResearchStartedAtMs: null,
+              deepResearchCompletedAtMs: null,
+              deepResearchDurationMs: null,
               deepResearchOwnerConversationId: null,
               activeDeepResearchMessageId: null,
               // Clear HITL pending interaction
@@ -409,6 +418,9 @@ export const useChatStore = create<ChatStore>()(
               deepResearchLastEventId: null,
               isDeepResearchStreaming: false,
               deepResearchStatus: null,
+              deepResearchStartedAtMs: null,
+              deepResearchCompletedAtMs: null,
+              deepResearchDurationMs: null,
               deepResearchOwnerConversationId: null,
               activeDeepResearchMessageId: null,
               // Clear HITL pending interaction
@@ -461,6 +473,9 @@ export const useChatStore = create<ChatStore>()(
               deepResearchLastEventId: null,
               isDeepResearchStreaming: false,
               deepResearchStatus: null,
+              deepResearchStartedAtMs: null,
+              deepResearchCompletedAtMs: null,
+              deepResearchDurationMs: null,
               deepResearchOwnerConversationId: null,
               activeDeepResearchMessageId: null,
               // Clear HITL pending interaction
@@ -521,6 +536,9 @@ export const useChatStore = create<ChatStore>()(
                 deepResearchLastEventId: null,
                 isDeepResearchStreaming: false,
                 deepResearchStatus: null,
+                deepResearchStartedAtMs: null,
+                deepResearchCompletedAtMs: null,
+                deepResearchDurationMs: null,
                 deepResearchOwnerConversationId: null,
                 activeDeepResearchMessageId: null,
                 deepResearchCitations: [],
@@ -781,6 +799,9 @@ export const useChatStore = create<ChatStore>()(
                 deepResearchLastEventId: null,
                 isDeepResearchStreaming: false,
                 deepResearchStatus: null,
+                deepResearchStartedAtMs: null,
+                deepResearchCompletedAtMs: null,
+                deepResearchDurationMs: null,
                 deepResearchOwnerConversationId: null,
                 activeDeepResearchMessageId: null,
                 deepResearchCitations: [],
@@ -864,6 +885,9 @@ export const useChatStore = create<ChatStore>()(
               deepResearchLastEventId: null,
               isDeepResearchStreaming: false,
               deepResearchStatus: null,
+              deepResearchStartedAtMs: null,
+              deepResearchCompletedAtMs: null,
+              deepResearchDurationMs: null,
               deepResearchOwnerConversationId: null,
               activeDeepResearchMessageId: null,
               deepResearchCitations: [],
@@ -1304,6 +1328,9 @@ export const useChatStore = create<ChatStore>()(
             deepResearchJobId,
             deepResearchLastEventId,
             deepResearchStatus,
+            deepResearchStartedAtMs,
+            deepResearchCompletedAtMs,
+            deepResearchDurationMs,
           } = get()
           if (!currentConversation) return
 
@@ -1329,6 +1356,9 @@ export const useChatStore = create<ChatStore>()(
             deepResearchJobId: deepResearchJobId || undefined,
             deepResearchLastEventId: deepResearchLastEventId || undefined,
             deepResearchJobStatus: deepResearchStatus || undefined,
+            deepResearchStartedAtMs: deepResearchStartedAtMs ?? undefined,
+            deepResearchCompletedAtMs: deepResearchCompletedAtMs ?? undefined,
+            deepResearchDurationMs: deepResearchDurationMs ?? undefined,
           }
 
           const updatedConversation: Conversation = {
@@ -1707,7 +1737,7 @@ export const useChatStore = create<ChatStore>()(
           bannerType: DeepResearchBannerType,
           jobId: string,
           conversationId?: string,
-          stats?: { totalTokens?: number; toolCallCount?: number }
+          stats?: { totalTokens?: number; toolCallCount?: number; durationMs?: number }
         ) => {
           const { currentConversation, conversations } = get()
 
@@ -1745,6 +1775,7 @@ export const useChatStore = create<ChatStore>()(
               jobId,
               totalTokens: stats?.totalTokens,
               toolCallCount: stats?.toolCallCount,
+              durationMs: stats?.durationMs,
             },
             // For 'starting' banners, include job metadata for session restoration
             ...(bannerType === 'starting' && {
@@ -1784,13 +1815,19 @@ export const useChatStore = create<ChatStore>()(
 
         startDeepResearch: (jobId: string, messageId?: string) => {
           const { currentConversation } = get()
+          const startedAtMs = Date.now()
+          const ownerConversationId = currentConversation?.id || null
+
           set(
             {
               deepResearchJobId: jobId,
               deepResearchLastEventId: null,
               isDeepResearchStreaming: true,
               deepResearchStatus: 'submitted',
-              deepResearchOwnerConversationId: currentConversation?.id || null,
+              deepResearchStartedAtMs: startedAtMs,
+              deepResearchCompletedAtMs: null,
+              deepResearchDurationMs: null,
+              deepResearchOwnerConversationId: ownerConversationId,
               activeDeepResearchMessageId: messageId || null,
               // Clear deep research execution content (but keep planMessages from planning phase)
               // planMessages are preserved to show the plan created during clarification
@@ -1807,6 +1844,17 @@ export const useChatStore = create<ChatStore>()(
             false,
             'startDeepResearch'
           )
+
+          if (ownerConversationId && messageId) {
+            get().patchConversationMessage(ownerConversationId, messageId, {
+              deepResearchJobId: jobId,
+              deepResearchJobStatus: 'submitted',
+              isDeepResearchActive: true,
+              deepResearchStartedAtMs: startedAtMs,
+              deepResearchCompletedAtMs: undefined,
+              deepResearchDurationMs: undefined,
+            })
+          }
         },
 
         updateDeepResearchStatus: (status: DeepResearchJobStatus) => {
@@ -1827,6 +1875,36 @@ export const useChatStore = create<ChatStore>()(
             false,
             'completeDeepResearch'
           )
+        },
+
+        finalizeDeepResearchRun: (completedAtMs = Date.now()) => {
+          const {
+            deepResearchStartedAtMs,
+            deepResearchOwnerConversationId,
+            activeDeepResearchMessageId,
+          } = get()
+
+          const durationMs =
+            deepResearchStartedAtMs !== null
+              ? Math.max(completedAtMs - deepResearchStartedAtMs, 0)
+              : null
+
+          set(
+            {
+              deepResearchCompletedAtMs: completedAtMs,
+              deepResearchDurationMs: durationMs,
+            },
+            false,
+            'finalizeDeepResearchRun'
+          )
+
+          if (deepResearchOwnerConversationId && activeDeepResearchMessageId) {
+            get().patchConversationMessage(deepResearchOwnerConversationId, activeDeepResearchMessageId, {
+              deepResearchStartedAtMs: deepResearchStartedAtMs ?? undefined,
+              deepResearchCompletedAtMs: completedAtMs,
+              deepResearchDurationMs: durationMs ?? undefined,
+            })
+          }
         },
 
         addDeepResearchCitation: (url: string, content: string, isCited?: boolean) => {
@@ -1951,6 +2029,9 @@ export const useChatStore = create<ChatStore>()(
               deepResearchLastEventId: null,
               isDeepResearchStreaming: false,
               deepResearchStatus: null,
+              deepResearchStartedAtMs: null,
+              deepResearchCompletedAtMs: null,
+              deepResearchDurationMs: null,
               deepResearchOwnerConversationId: null,
               activeDeepResearchMessageId: null,
               deepResearchCitations: [],
@@ -2070,6 +2151,9 @@ export const useChatStore = create<ChatStore>()(
                   deepResearchLastEventId: null,
                   isDeepResearchStreaming: true,
                   deepResearchStatus: currentStatus,
+                  deepResearchStartedAtMs: activeJobMessage.deepResearchStartedAtMs ?? null,
+                  deepResearchCompletedAtMs: null,
+                  deepResearchDurationMs: null,
                   deepResearchOwnerConversationId: conversationId,
                   activeDeepResearchMessageId: messageId,
                   deepResearchCitations: [],
@@ -2091,15 +2175,27 @@ export const useChatStore = create<ChatStore>()(
               clearDeepResearchSession(jobId)
               // Defensive cleanup: if sessionStorage restored items in 'running' state, fix them
               get().stopAllDeepResearchSpinners(currentStatus === 'success')
+              const durationMs =
+                typeof statusResponse.elapsed_seconds === 'number'
+                  ? Math.round(statusResponse.elapsed_seconds * 1000)
+                  : activeJobMessage.deepResearchDurationMs
+              const completedAtMs = statusResponse.updated_at
+                ? Date.parse(statusResponse.updated_at)
+                : activeJobMessage.deepResearchCompletedAtMs
               get().patchConversationMessage(conversationId, messageId, {
                 deepResearchJobStatus: currentStatus,
                 isDeepResearchActive: false,
                 showViewReport: currentStatus === 'success',
+                deepResearchStartedAtMs: activeJobMessage.deepResearchStartedAtMs,
+                deepResearchCompletedAtMs: Number.isFinite(completedAtMs) ? completedAtMs : undefined,
+                deepResearchDurationMs: durationMs,
               })
               // Add terminal banner (also removes orphaned 'starting' banner for this job)
               const terminalBannerType: DeepResearchBannerType =
                 currentStatus === 'success' ? 'success' : 'failure'
-              get().addDeepResearchBanner(terminalBannerType, jobId, conversationId)
+              get().addDeepResearchBanner(terminalBannerType, jobId, conversationId, {
+                durationMs: durationMs ?? undefined,
+              })
             }
           } catch (error) {
             console.warn('Failed to reconnect to active job:', error)
@@ -2109,8 +2205,13 @@ export const useChatStore = create<ChatStore>()(
                 deepResearchJobStatus: 'failure',
                 isDeepResearchActive: false,
                 showViewReport: Boolean(activeJobMessage.reportContent?.trim()),
+                deepResearchStartedAtMs: activeJobMessage.deepResearchStartedAtMs,
+                deepResearchCompletedAtMs: Date.now(),
+                deepResearchDurationMs: activeJobMessage.deepResearchDurationMs,
               })
-              get().addDeepResearchBanner('failure', jobId, conversationId)
+              get().addDeepResearchBanner('failure', jobId, conversationId, {
+                durationMs: activeJobMessage.deepResearchDurationMs,
+              })
             } else {
               // Mark as inactive to prevent retry loops
               get().patchConversationMessage(conversationId, activeJobMessage.id, {
@@ -2128,7 +2229,8 @@ export const useChatStore = create<ChatStore>()(
           const conversationId = currentConversation.id
           const syncTrackingMessageToTerminalState = (
             jobId: string,
-            terminalStatus: DeepResearchJobStatus
+            terminalStatus: DeepResearchJobStatus,
+            timing?: { completedAtMs?: number; durationMs?: number }
           ): void => {
             const conversation = get().conversations.find((c) => c.id === conversationId)
             if (!conversation) return
@@ -2146,6 +2248,9 @@ export const useChatStore = create<ChatStore>()(
               deepResearchJobStatus: terminalStatus,
               isDeepResearchActive: false,
               showViewReport: terminalStatus === 'success' || hasPartialReport,
+              deepResearchStartedAtMs: trackingMessage.deepResearchStartedAtMs,
+              deepResearchCompletedAtMs: timing?.completedAtMs,
+              deepResearchDurationMs: timing?.durationMs,
             })
           }
           const bannerTypeToTerminalStatus = (
@@ -2188,7 +2293,13 @@ export const useChatStore = create<ChatStore>()(
               const terminalStatus = bannerTypeToTerminalStatus(
                 matchingTerminalBanner.deepResearchBannerData?.bannerType
               )
-              syncTrackingMessageToTerminalState(bannerJobId, terminalStatus)
+              syncTrackingMessageToTerminalState(bannerJobId, terminalStatus, {
+                completedAtMs:
+                  matchingTerminalBanner.timestamp instanceof Date
+                    ? matchingTerminalBanner.timestamp.getTime()
+                    : Date.parse(matchingTerminalBanner.timestamp),
+                durationMs: matchingTerminalBanner.deepResearchBannerData?.durationMs,
+              })
               orphanedIds.push(banner.id)
             } else {
               needsCheck.push({ bannerId: banner.id, jobId: bannerJobId })
@@ -2235,11 +2346,23 @@ export const useChatStore = create<ChatStore>()(
                   const statusResponse = await getJobStatus(jobId)
                   const terminalStatuses = ['success', 'failure', 'interrupted']
                   if (terminalStatuses.includes(statusResponse.status)) {
-                    syncTrackingMessageToTerminalState(jobId, statusResponse.status)
+                    const durationMs =
+                      typeof statusResponse.elapsed_seconds === 'number'
+                        ? Math.round(statusResponse.elapsed_seconds * 1000)
+                        : undefined
+                    const completedAtMs = statusResponse.updated_at
+                      ? Date.parse(statusResponse.updated_at)
+                      : undefined
+                    syncTrackingMessageToTerminalState(jobId, statusResponse.status, {
+                      completedAtMs: Number.isFinite(completedAtMs) ? completedAtMs : undefined,
+                      durationMs,
+                    })
                     const terminalType: DeepResearchBannerType =
                       statusResponse.status === 'success' ? 'success' : 'failure'
                     // addDeepResearchBanner removes the starting banner and adds the terminal one
-                    get().addDeepResearchBanner(terminalType, jobId, conversationId)
+                    get().addDeepResearchBanner(terminalType, jobId, conversationId, {
+                      durationMs,
+                    })
                   }
                 } catch (error) {
                   if (isUnavailableDeepResearchJobError(error)) {
@@ -2599,6 +2722,9 @@ export const useChatStore = create<ChatStore>()(
               deepResearchLastEventId: null,
               isDeepResearchStreaming: false,
               deepResearchStatus: null,
+              deepResearchStartedAtMs: lastAgentResponse?.deepResearchStartedAtMs ?? null,
+              deepResearchCompletedAtMs: lastAgentResponse?.deepResearchCompletedAtMs ?? null,
+              deepResearchDurationMs: lastAgentResponse?.deepResearchDurationMs ?? null,
               activeDeepResearchMessageId: lastAgentResponse?.id || null,
               deepResearchOwnerConversationId: conversation.id,
               // Set to false to trigger lazy loading when tabs are opened
