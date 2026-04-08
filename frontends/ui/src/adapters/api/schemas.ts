@@ -234,9 +234,17 @@ export const NATErrorContentSchema = z.object({
 export const NATErrorMessageSchema = z.object({
   type: z.literal(NATMessageType.ERROR),
   id: z.string().optional(),
+  thread_id: z.string().optional(),
+  parent_id: z.string().optional(),
   conversation_id: z.string().optional(),
   content: NATErrorContentSchema,
-  status: z.literal(WebSocketMessageStatus.ERROR).optional(),
+  // Some backend workflow errors currently arrive as `in_progress`.
+  // Accept any known websocket status so real errors are never dropped.
+  status: z.enum([
+    WebSocketMessageStatus.IN_PROGRESS,
+    WebSocketMessageStatus.COMPLETE,
+    WebSocketMessageStatus.ERROR,
+  ]).optional(),
   timestamp: z.string().optional(),
 })
 

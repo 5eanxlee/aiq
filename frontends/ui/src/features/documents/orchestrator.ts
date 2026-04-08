@@ -45,6 +45,8 @@ interface OrchestratorCallbacks {
   onError?: (error: Error) => void
 }
 
+const isProjectCollectionName = (collectionName: string): boolean => collectionName.startsWith('project_')
+
 class UploadOrchestratorImpl {
   private pollingState: PollingState | null = null
   private currentSessionId: string | null = null
@@ -95,7 +97,7 @@ class UploadOrchestratorImpl {
 
     // Signal loading immediately so the UI shows a spinner before any async work.
     // loadFilesForSession (or early returns below) will clear this.
-    if (newSessionId && sessionHasKnownCollection(newSessionId)) {
+    if (newSessionId && (sessionHasKnownCollection(newSessionId) || isProjectCollectionName(newSessionId))) {
       this.getStore().setLoadingFiles(true)
     }
 
@@ -155,7 +157,8 @@ class UploadOrchestratorImpl {
     // for sessions without a known collection just generates 404 errors.
     const hasKnownCollection = sessionHasKnownCollection(sessionId)
     const hasPersistedJob = getPersistedJobForCollection(sessionId) !== null
-    if (!hasKnownCollection && !hasPersistedJob) {
+    const shouldProbeProjectCollection = isProjectCollectionName(sessionId)
+    if (!hasKnownCollection && !hasPersistedJob && !shouldProbeProjectCollection) {
       this.lastLoadedSessionId = sessionId
       store.setLoadingFiles(false)
       return

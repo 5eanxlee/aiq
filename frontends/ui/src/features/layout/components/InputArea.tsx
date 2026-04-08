@@ -19,9 +19,11 @@
 import { type FC, useState, useCallback, useRef, useEffect, type KeyboardEvent } from 'react'
 import { Flex, Text, Button, TextArea, Banner, Popover } from '@/adapters/ui'
 import { useChat, useWebSocketChat, useChatStore, useIsCurrentSessionBusy } from '@/features/chat'
+import { resolveKnowledgeCollectionName } from '@/features/chat/lib/resolve-knowledge-collection'
 import { useLayoutStore } from '../store'
 import { useAppConfig } from '@/shared/context'
 import { useFileUpload, useFileDragDrop, useFileUploadBanners } from '@/features/documents'
+import { useProjectsStore } from '@/features/projects'
 import { Globe, Document, Paperclip, Paperplane, Cancel } from '@/adapters/ui/icons'
 
 /** Connection mode for the chat */
@@ -72,6 +74,19 @@ export const InputArea: FC<InputAreaProps> = ({
   // Get current conversation for filtering files and ensureSession for auto-creation
   const currentConversation = useChatStore((state) => state.currentConversation)
   const ensureSession = useChatStore((state) => state.ensureSession)
+  const currentProject = useProjectsStore((state) => {
+    const targetProjectId = currentConversation
+      ? currentConversation.projectId ?? null
+      : state.currentProjectId
+    if (!targetProjectId) {
+      return null
+    }
+    return state.projects.find((project) => project.id === targetProjectId) ?? null
+  })
+  const currentCollectionName = resolveKnowledgeCollectionName(
+    currentConversation,
+    currentProject?.knowledgeCollectionName
+  )
 
   // Deep research completion state - disables new submissions after research completes
   const deepResearchStatus = useChatStore((state) => state.deepResearchStatus)
@@ -132,6 +147,7 @@ export const InputArea: FC<InputAreaProps> = ({
     clearError,
   } = useFileUpload({
     sessionId: currentConversation?.id,
+    collectionName: currentCollectionName,
   })
 
   // File upload banner hook - monitors file status and triggers banner messages in chat
@@ -304,13 +320,27 @@ export const InputArea: FC<InputAreaProps> = ({
         console.error('Failed to create session for upload')
         return
       }
+      const activeConversation = useChatStore.getState().currentConversation
+      const activeProjectsState = useProjectsStore.getState()
+      const activeProject =
+        activeConversation?.projectId
+          ? activeProjectsState.projects.find((project) => project.id === activeConversation.projectId)
+          : activeProjectsState.getCurrentProject()
+      const targetCollectionName = resolveKnowledgeCollectionName(
+        activeConversation,
+        activeProject?.knowledgeCollectionName
+      )
+      if (!targetCollectionName) {
+        console.error('Failed to resolve collection for upload')
+        return
+      }
 
       // Open the files tab immediately so the user sees instant feedback
       setDataSourcesPanelTab('files')
       openRightPanel('data-sources')
 
       // uploadFiles validates internally and sets error if invalid
-      await uploadFiles(files, sessionId)
+      await uploadFiles(files, targetCollectionName)
     },
     [
       ensureSession,

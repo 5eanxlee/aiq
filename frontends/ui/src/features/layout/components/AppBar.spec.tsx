@@ -10,6 +10,7 @@ import { AppBar } from './AppBar'
 const mockToggleSessionsPanel = vi.fn()
 const mockOpenRightPanel = vi.fn()
 const mockCloseRightPanel = vi.fn()
+const mockSetTheme = vi.fn()
 
 vi.mock('../store', () => ({
   useLayoutStore: () => ({
@@ -17,6 +18,8 @@ vi.mock('../store', () => ({
     rightPanel: null,
     openRightPanel: mockOpenRightPanel,
     closeRightPanel: mockCloseRightPanel,
+    theme: 'system',
+    setTheme: mockSetTheme,
   }),
 }))
 
@@ -57,25 +60,44 @@ describe('AppBar', () => {
   test('shows session title when authenticated', () => {
     render(<AppBar isAuthenticated={true} sessionTitle="My Research Session" />)
 
-    expect(screen.getByText('My Research Session')).toBeInTheDocument()
+    expect(screen.getByText(/Session:\s*My Research Session/i)).toBeInTheDocument()
   })
 
-  test('disables action buttons when not authenticated', () => {
+  test('shows active project title when authenticated', () => {
+    render(<AppBar isAuthenticated={true} projectTitle="Project Atlas" />)
+
+    expect(screen.getByText('Project')).toBeInTheDocument()
+    expect(screen.getByText('Project Atlas')).toBeInTheDocument()
+  })
+
+  test('shows standalone scope details when no project is active', () => {
+    render(<AppBar isAuthenticated={true} isStandaloneScope={true} sessionTitle="Fresh Chat" />)
+
+    expect(screen.getByText('Standalone')).toBeInTheDocument()
+    expect(screen.getByText('Standalone Chat')).toBeInTheDocument()
+    expect(screen.getByText(/chat:\s*fresh chat \| no shared project files/i)).toBeInTheDocument()
+  })
+
+  test('disables auth-gated action buttons when not authenticated', () => {
     render(<AppBar isAuthenticated={false} />)
 
-    expect(screen.getByRole('button', { name: /create new session/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /create new standalone chat/i })).toBeDisabled()
     expect(screen.getByRole('button', { name: /toggle sessions sidebar/i })).toBeDisabled()
     expect(screen.getByRole('button', { name: /add data sources/i })).toBeDisabled()
-    expect(screen.getByRole('button', { name: /open settings/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /open research providers/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /open config/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /open theme selector/i })).not.toBeDisabled()
   })
 
   test('enables action buttons when authenticated', () => {
     render(<AppBar isAuthenticated={true} />)
 
-    expect(screen.getByRole('button', { name: /create new session/i })).not.toBeDisabled()
+    expect(screen.getByRole('button', { name: /create new standalone chat/i })).not.toBeDisabled()
     expect(screen.getByRole('button', { name: /toggle sessions sidebar/i })).not.toBeDisabled()
     expect(screen.getByRole('button', { name: /add data sources/i })).not.toBeDisabled()
-    expect(screen.getByRole('button', { name: /open settings/i })).not.toBeDisabled()
+    expect(screen.getByRole('button', { name: /open research providers/i })).not.toBeDisabled()
+    expect(screen.getByRole('button', { name: /open config/i })).not.toBeDisabled()
+    expect(screen.getByRole('button', { name: /open theme selector/i })).not.toBeDisabled()
   })
 
   test('calls onNewSession when logo button clicked', async () => {
@@ -84,7 +106,7 @@ describe('AppBar', () => {
 
     render(<AppBar isAuthenticated={true} onNewSession={onNewSession} />)
 
-    await user.click(screen.getByRole('button', { name: /create new session/i }))
+    await user.click(screen.getByRole('button', { name: /create new standalone chat/i }))
 
     expect(onNewSession).toHaveBeenCalledOnce()
   })
@@ -92,7 +114,7 @@ describe('AppBar', () => {
   test('disables new session button when shallow navigation is blocked', () => {
     render(<AppBar isAuthenticated={true} isNewSessionDisabled={true} />)
 
-    expect(screen.getByRole('button', { name: /create new session/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /create new standalone chat/i })).toBeDisabled()
     // Other action buttons remain enabled.
     expect(screen.getByRole('button', { name: /toggle sessions sidebar/i })).not.toBeDisabled()
   })
@@ -117,14 +139,35 @@ describe('AppBar', () => {
     expect(mockOpenRightPanel).toHaveBeenCalledWith('data-sources')
   })
 
-  test('opens settings panel when Settings clicked', async () => {
+  test('opens config panel when Config clicked', async () => {
     const user = userEvent.setup()
 
     render(<AppBar isAuthenticated={true} />)
 
-    await user.click(screen.getByRole('button', { name: /open settings/i }))
+    await user.click(screen.getByRole('button', { name: /open config/i }))
 
     expect(mockOpenRightPanel).toHaveBeenCalledWith('settings')
+  })
+
+  test('opens theme selector and updates the theme', async () => {
+    const user = userEvent.setup()
+
+    render(<AppBar isAuthenticated={true} />)
+
+    await user.click(screen.getByRole('button', { name: /open theme selector/i }))
+    await user.click(screen.getByText('Dark'))
+
+    expect(mockSetTheme).toHaveBeenCalledWith('dark')
+  })
+
+  test('opens providers panel when Providers clicked', async () => {
+    const user = userEvent.setup()
+
+    render(<AppBar isAuthenticated={true} />)
+
+    await user.click(screen.getByRole('button', { name: /open research providers/i }))
+
+    expect(mockOpenRightPanel).toHaveBeenCalledWith('providers')
   })
 
   test('renders Docs button that opens in new tab', () => {
@@ -190,10 +233,12 @@ describe('AppBar', () => {
     test('action buttons are enabled when auth is disabled (user is authenticated)', () => {
       render(<AppBar isAuthenticated={true} authRequired={false} />)
 
-      expect(screen.getByRole('button', { name: /create new session/i })).not.toBeDisabled()
+      expect(screen.getByRole('button', { name: /create new standalone chat/i })).not.toBeDisabled()
       expect(screen.getByRole('button', { name: /toggle sessions sidebar/i })).not.toBeDisabled()
       expect(screen.getByRole('button', { name: /add data sources/i })).not.toBeDisabled()
-      expect(screen.getByRole('button', { name: /open settings/i })).not.toBeDisabled()
+      expect(screen.getByRole('button', { name: /open research providers/i })).not.toBeDisabled()
+      expect(screen.getByRole('button', { name: /open config/i })).not.toBeDisabled()
+      expect(screen.getByRole('button', { name: /open theme selector/i })).not.toBeDisabled()
     })
 
     test('shows session title when auth is disabled', () => {
@@ -201,7 +246,7 @@ describe('AppBar', () => {
         <AppBar isAuthenticated={true} authRequired={false} sessionTitle="My Research Session" />
       )
 
-      expect(screen.getByText('My Research Session')).toBeInTheDocument()
+      expect(screen.getByText(/Session:\s*My Research Session/i)).toBeInTheDocument()
     })
   })
 })

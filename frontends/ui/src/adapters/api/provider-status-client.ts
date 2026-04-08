@@ -83,6 +83,87 @@ export interface ProviderDashboardFromAPI {
   runtime_window_minutes: number
   providers: ProviderStatusFromAPI[]
   workers: WorkerStatusFromAPI[]
+  config_presets: ConfigPresetFromAPI[]
+  config_runtime?: ConfigRuntimeFromAPI | null
+}
+
+export interface ConfigPresetFromAPI {
+  id: string
+  name: string
+  config_path: string
+  description?: string | null
+  kind?: 'preset' | 'repo_config' | string
+  recommended: boolean
+  current: boolean
+}
+
+export interface ConfigRuntimeFromAPI {
+  current_config_path?: string | null
+  current_config_name?: string | null
+  current_preset_id?: string | null
+  can_apply_presets: boolean
+  apply_requires_restart: boolean
+  local_stack_running: boolean
+  backend_port?: number | null
+  frontend_port?: number | null
+  next_port?: number | null
+}
+
+export interface ApplyConfigPresetResponseFromAPI {
+  accepted: boolean
+  message: string
+  config_path: string
+  backend_url?: string | null
+  frontend_url?: string | null
+  operation_id?: string | null
+}
+
+export interface LocalResearchOptionsFromAPI {
+  supported: boolean
+  local_stack_running: boolean
+  can_edit: boolean
+  requires_reload: boolean
+  config_path?: string | null
+  generated_config_path?: string | null
+  knowledge_layer_enabled: boolean
+  generate_summary: boolean
+  top_k: number
+  notes: string[]
+}
+
+export interface ApplyLocalResearchOptionsRequestFromAPI {
+  knowledge_layer_enabled: boolean
+  generate_summary: boolean
+  top_k: number
+}
+
+export interface ApplyLocalResearchOptionsResponseFromAPI extends ApplyConfigPresetResponseFromAPI {
+  options?: LocalResearchOptionsFromAPI
+}
+
+export interface LocalConfigReloadStatusFromAPI {
+  operation_id?: string | null
+  state:
+    | 'idle'
+    | 'scheduled'
+    | 'validating'
+    | 'stopping'
+    | 'starting'
+    | 'rolling_back'
+    | 'rolled_back'
+    | 'ready'
+    | 'failed'
+    | string
+  message: string
+  error?: string | null
+  config_path?: string | null
+  previous_config_path?: string | null
+  backend_url?: string | null
+  frontend_url?: string | null
+  log_path?: string | null
+  rollback_attempted?: boolean
+  rollback_succeeded?: boolean
+  updated_at?: string | null
 }
 
 export interface ProviderStatusClientOptions {
@@ -127,6 +208,68 @@ export const createProviderStatusClient = (options: ProviderStatusClientOptions 
 
       if (!response.ok) {
         await handleApiError(response, 'Failed to fetch provider status')
+      }
+
+      return response.json()
+    },
+
+    async applyConfigPreset(configPath: string, signal?: AbortSignal): Promise<ApplyConfigPresetResponseFromAPI> {
+      const url = '/api/local-stack/config-reload'
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ config_path: configPath }),
+        signal,
+      })
+
+      if (!response.ok) {
+        await handleApiError(response, 'Failed to apply config preset')
+      }
+
+      return response.json()
+    },
+
+    async getLocalConfigReloadStatus(signal?: AbortSignal): Promise<LocalConfigReloadStatusFromAPI> {
+      const response = await fetch('/api/local-stack/config-reload', {
+        method: 'GET',
+        headers: getHeaders(),
+        signal,
+      })
+
+      if (!response.ok) {
+        await handleApiError(response, 'Failed to fetch local config reload status')
+      }
+
+      return response.json()
+    },
+
+    async getLocalResearchOptions(signal?: AbortSignal): Promise<LocalResearchOptionsFromAPI> {
+      const response = await fetch('/api/local-stack/research-options', {
+        method: 'GET',
+        headers: getHeaders(),
+        signal,
+      })
+
+      if (!response.ok) {
+        await handleApiError(response, 'Failed to fetch local research options')
+      }
+
+      return response.json()
+    },
+
+    async applyLocalResearchOptions(
+      options: ApplyLocalResearchOptionsRequestFromAPI,
+      signal?: AbortSignal
+    ): Promise<ApplyLocalResearchOptionsResponseFromAPI> {
+      const response = await fetch('/api/local-stack/research-options', {
+        method: 'PATCH',
+        headers: getHeaders(),
+        body: JSON.stringify(options),
+        signal,
+      })
+
+      if (!response.ok) {
+        await handleApiError(response, 'Failed to apply local research options')
       }
 
       return response.json()

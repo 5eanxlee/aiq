@@ -33,7 +33,9 @@ const formatTime = (date: Date | string): string => {
  * Subscribes to planMessages from the chat store.
  */
 export const PlanTab: FC = () => {
-  const { planMessages, isStreaming, isLoading } = useChatStore()
+  const planMessages = useChatStore((state) => state.planMessages)
+  const isStreaming = useChatStore((state) => state.isStreaming)
+  const isLoading = useChatStore((state) => state.isLoading)
 
   const isEmpty = planMessages.length === 0
   const isActive = isStreaming || isLoading

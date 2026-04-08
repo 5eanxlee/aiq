@@ -27,13 +27,18 @@ const mockClearThinkingSteps = vi.fn()
 const mockClearReportContent = vi.fn()
 const mockCreateConversation = vi.fn()
 const mockSetCurrentUser = vi.fn()
-const mockGetUserConversations = vi.fn(() => [])
+const mockGetUserConversations = vi.fn(
+  (): Array<{ id: string; messages: unknown[]; userId: string }> => []
+)
 const mockSelectConversation = vi.fn()
 const mockRespondToPrompt = vi.fn()
 const mockAddPlanMessage = vi.fn()
 const mockUpdatePlanMessageResponse = vi.fn()
 const mockAddDeepResearchBanner = vi.fn()
 const mockDismissConnectionErrors = vi.fn()
+const mockPatchConversation = vi.fn()
+const mockStartDeepResearch = vi.fn()
+const mockUpdateConversationTitle = vi.fn()
 
 // Mock store state
 let mockStoreState: {
@@ -64,43 +69,62 @@ let mockStoreState: {
   planMessages: [],
 }
 
+const mockEnsureSession = vi.fn(() => {
+  if (mockStoreState.currentConversation?.id) {
+    return mockStoreState.currentConversation.id
+  }
+  if (!mockStoreState.currentUserId) {
+    return undefined
+  }
+  mockStoreState.currentConversation = {
+    id: 'generated-conv-1',
+    messages: [],
+    userId: mockStoreState.currentUserId,
+  }
+  return mockStoreState.currentConversation.id
+})
+
+const buildChatStoreValue = () => ({
+  ...mockStoreState,
+  addUserMessage: mockAddUserMessage,
+  addAgentResponse: mockAddAgentResponse,
+  addAgentResponseWithMeta: mockAddAgentResponseWithMeta,
+  addThinkingStep: mockAddThinkingStep,
+  appendToThinkingStep: mockAppendToThinkingStep,
+  completeThinkingStep: mockCompleteThinkingStep,
+  updateThinkingStepByFunctionName: mockUpdateThinkingStepByFunctionName,
+  findThinkingStepByFunctionName: mockFindThinkingStepByFunctionName,
+  setReportContent: mockSetReportContent,
+  addStatusCard: mockAddStatusCard,
+  addAgentPrompt: mockAddAgentPrompt,
+  addErrorCard: mockAddErrorCard,
+  setCurrentStatus: mockSetCurrentStatus,
+  setPendingInteraction: mockSetPendingInteraction,
+  clearPendingInteraction: mockClearPendingInteraction,
+  setLoading: mockSetLoading,
+  setStreaming: mockSetStreaming,
+  clearThinkingSteps: mockClearThinkingSteps,
+  clearReportContent: mockClearReportContent,
+  createConversation: mockCreateConversation,
+  ensureSession: mockEnsureSession,
+  patchConversation: mockPatchConversation,
+  setCurrentUser: mockSetCurrentUser,
+  getUserConversations: mockGetUserConversations,
+  selectConversation: mockSelectConversation,
+  respondToPrompt: mockRespondToPrompt,
+  addPlanMessage: mockAddPlanMessage,
+  updatePlanMessageResponse: mockUpdatePlanMessageResponse,
+  addDeepResearchBanner: mockAddDeepResearchBanner,
+  dismissConnectionErrors: mockDismissConnectionErrors,
+  startDeepResearch: mockStartDeepResearch,
+  updateConversationTitle: mockUpdateConversationTitle,
+})
+
 vi.mock('../store', () => ({
   useChatStore: Object.assign(
-    vi.fn(() => ({
-      ...mockStoreState,
-      addUserMessage: mockAddUserMessage,
-      addAgentResponse: mockAddAgentResponse,
-      addAgentResponseWithMeta: mockAddAgentResponseWithMeta,
-      addThinkingStep: mockAddThinkingStep,
-      appendToThinkingStep: mockAppendToThinkingStep,
-      completeThinkingStep: mockCompleteThinkingStep,
-      updateThinkingStepByFunctionName: mockUpdateThinkingStepByFunctionName,
-      findThinkingStepByFunctionName: mockFindThinkingStepByFunctionName,
-      setReportContent: mockSetReportContent,
-      addStatusCard: mockAddStatusCard,
-      addAgentPrompt: mockAddAgentPrompt,
-      addErrorCard: mockAddErrorCard,
-      setCurrentStatus: mockSetCurrentStatus,
-      setPendingInteraction: mockSetPendingInteraction,
-      clearPendingInteraction: mockClearPendingInteraction,
-      setLoading: mockSetLoading,
-      setStreaming: mockSetStreaming,
-      clearThinkingSteps: mockClearThinkingSteps,
-      clearReportContent: mockClearReportContent,
-      createConversation: mockCreateConversation,
-      setCurrentUser: mockSetCurrentUser,
-      getUserConversations: mockGetUserConversations,
-      selectConversation: mockSelectConversation,
-      respondToPrompt: mockRespondToPrompt,
-      addPlanMessage: mockAddPlanMessage,
-      updatePlanMessageResponse: mockUpdatePlanMessageResponse,
-      addDeepResearchBanner: mockAddDeepResearchBanner,
-      dismissConnectionErrors: mockDismissConnectionErrors,
-    })),
+    vi.fn(() => buildChatStoreValue()),
     {
-      getState: vi.fn(() => ({
-        ...mockStoreState,
-      })),
+      getState: vi.fn(() => buildChatStoreValue()),
     }
   ),
   selectHasConnectionError: () => false,
@@ -204,7 +228,15 @@ describe('useWebSocketChat', () => {
       pendingInteraction: null,
       planMessages: [],
     }
-    vi.mocked(useChatStore).getState = vi.fn(() => mockStoreState) as unknown as typeof useChatStore.getState
+    mockGetUserConversations.mockImplementation(() =>
+      mockStoreState.currentConversation ? [mockStoreState.currentConversation] : []
+    )
+    vi.mocked(useChatStore).mockImplementation(
+      () => buildChatStoreValue() as unknown as ReturnType<typeof useChatStore>
+    )
+    vi.mocked(useChatStore).getState = vi.fn(
+      () => buildChatStoreValue() as unknown as ReturnType<typeof useChatStore>
+    ) as unknown as typeof useChatStore.getState
     mockWsClient.isConnected.mockReturnValue(false)
   })
 
@@ -248,14 +280,14 @@ describe('useWebSocketChat', () => {
     expect(mockAddUserMessage).not.toHaveBeenCalled()
   })
 
-  test('sendMessage adds user message and prepares for streaming', () => {
+  test('sendMessage adds user message and prepares for streaming', async () => {
     mockWsClient.isConnected.mockReturnValue(true)
 
     // autoConnect: true triggers useEffect that creates the WebSocket client
     const { result } = renderWebSocketHook()
 
-    act(() => {
-      result.current.sendMessage('Hello')
+    await act(async () => {
+      await result.current.sendMessage('Hello')
     })
 
     expect(mockAddUserMessage).toHaveBeenCalledWith('Hello', {
@@ -271,13 +303,13 @@ describe('useWebSocketChat', () => {
     expect(mockSetLoading).toHaveBeenCalledWith(true)
   })
 
-  test('sendMessage sends via WebSocket when connected', () => {
+  test('sendMessage sends via WebSocket when connected', async () => {
     mockWsClient.isConnected.mockReturnValue(true)
 
     const { result } = renderWebSocketHook()
 
-    act(() => {
-      result.current.sendMessage('Hello')
+    await act(async () => {
+      await result.current.sendMessage('Hello')
     })
 
     // sendMessage is called with content and enabled data sources
@@ -303,8 +335,8 @@ describe('useWebSocketChat', () => {
 
     const { result } = renderWebSocketHook()
 
-    act(() => {
-      result.current.sendMessage('Hello')
+    await act(async () => {
+      await result.current.sendMessage('Hello')
     })
 
     // knowledge_layer should NOT be added since no files exist
@@ -331,8 +363,8 @@ describe('useWebSocketChat', () => {
 
     const { result } = renderWebSocketHook()
 
-    act(() => {
-      result.current.sendMessage('Hello')
+    await act(async () => {
+      await result.current.sendMessage('Hello')
     })
 
     // knowledge_layer should be ADDED since files exist for this session
@@ -359,8 +391,8 @@ describe('useWebSocketChat', () => {
 
     const { result } = renderWebSocketHook()
 
-    act(() => {
-      result.current.sendMessage('Hello')
+    await act(async () => {
+      await result.current.sendMessage('Hello')
     })
 
     // knowledge_layer should be ADDED since files are being ingested
@@ -387,27 +419,33 @@ describe('useWebSocketChat', () => {
 
     const { result } = renderWebSocketHook()
 
-    act(() => {
-      result.current.sendMessage('Hello')
+    await act(async () => {
+      await result.current.sendMessage('Hello')
     })
 
     // knowledge_layer should NOT be added even with files if knowledgeLayerAvailable is false
     expect(mockWsClient.sendMessage).toHaveBeenCalledWith('Hello', ['web', 'docs'])
   })
 
-  test('sendMessage sets error when WebSocket not connected and no conversation', () => {
+  test('sendMessage creates and connects a session when none exists yet', async () => {
     mockWsClient.isConnected.mockReturnValue(false)
     mockStoreState.currentConversation = null
-    vi.mocked(useChatStore).getState = vi.fn(() => mockStoreState) as unknown as typeof useChatStore.getState
+    vi.mocked(useChatStore).mockImplementation(
+      () => buildChatStoreValue() as unknown as ReturnType<typeof useChatStore>
+    )
+    vi.mocked(useChatStore).getState = vi.fn(
+      () => buildChatStoreValue() as unknown as ReturnType<typeof useChatStore>
+    ) as unknown as typeof useChatStore.getState
 
     const { result } = renderWebSocketHook({ autoConnect: false })
 
-    act(() => {
-      result.current.sendMessage('Hello')
+    await act(async () => {
+      await result.current.sendMessage('Hello')
     })
 
-    expect(mockAddErrorCard).toHaveBeenCalledWith('system.unknown', 'No active conversation')
-    expect(mockSetStreaming).toHaveBeenCalledWith(false)
+    expect(mockEnsureSession).toHaveBeenCalled()
+    expect(mockWsClient.connect).toHaveBeenCalled()
+    expect(mockAddErrorCard).not.toHaveBeenCalled()
   })
 
   test('onResponse callback routes meta/shallow responses to chat', () => {
@@ -767,39 +805,11 @@ describe('useWebSocketChat', () => {
   })
 
   test('detects deep research escalation and starts SSE streaming', () => {
-    const mockStartDeepResearch = vi.fn()
-    const mockUpdateConversationTitle = vi.fn()
     const localMockAddAgentResponseWithMeta = vi.fn(() => 'msg-1')
     // Need to mock useChatStore to include startDeepResearch
     vi.mocked(useChatStore).mockReturnValue({
-      ...mockStoreState,
-      addUserMessage: mockAddUserMessage,
-      addAgentResponse: mockAddAgentResponse,
+      ...buildChatStoreValue(),
       addAgentResponseWithMeta: localMockAddAgentResponseWithMeta,
-      addThinkingStep: mockAddThinkingStep,
-      appendToThinkingStep: mockAppendToThinkingStep,
-      completeThinkingStep: mockCompleteThinkingStep,
-      updateThinkingStepByFunctionName: mockUpdateThinkingStepByFunctionName,
-      findThinkingStepByFunctionName: mockFindThinkingStepByFunctionName,
-      setReportContent: mockSetReportContent,
-      addStatusCard: mockAddStatusCard,
-      addAgentPrompt: mockAddAgentPrompt,
-      addErrorCard: mockAddErrorCard,
-      setCurrentStatus: mockSetCurrentStatus,
-      setPendingInteraction: mockSetPendingInteraction,
-      clearPendingInteraction: mockClearPendingInteraction,
-      setLoading: mockSetLoading,
-      setStreaming: mockSetStreaming,
-      clearThinkingSteps: mockClearThinkingSteps,
-      clearReportContent: mockClearReportContent,
-      createConversation: mockCreateConversation,
-      setCurrentUser: mockSetCurrentUser,
-      getUserConversations: mockGetUserConversations,
-      selectConversation: mockSelectConversation,
-      respondToPrompt: mockRespondToPrompt,
-      addPlanMessage: mockAddPlanMessage,
-      updatePlanMessageResponse: mockUpdatePlanMessageResponse,
-      addDeepResearchBanner: mockAddDeepResearchBanner,
       startDeepResearch: mockStartDeepResearch,
       updateConversationTitle: mockUpdateConversationTitle,
     } as unknown as ReturnType<typeof useChatStore>)

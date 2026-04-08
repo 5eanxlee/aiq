@@ -26,6 +26,9 @@ vi.mock('./documents-schemas', () => ({
   FileListResponseSchema: {
     parse: (data: unknown) => data,
   },
+  FilePreviewSchema: {
+    parse: (data: unknown) => data,
+  },
   UploadResponseSchema: {
     parse: (data: unknown) => data,
   },
@@ -328,6 +331,80 @@ describe('createDocumentsClient', () => {
       const client = createDocumentsClient()
 
       await expect(client.deleteFiles('test', ['file-1'])).resolves.not.toThrow()
+    })
+  })
+
+  describe('getFilePreview', () => {
+    test('loads preview metadata successfully', async () => {
+      const mockPreview = {
+        file_id: 'file-1',
+        file_name: 'doc.pdf',
+        collection_name: 'test-collection',
+        status: 'success',
+        chunk_count: 2,
+        metadata: {},
+      }
+
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve(mockPreview),
+      })
+
+      const client = createDocumentsClient()
+      const result = await client.getFilePreview('test-collection', 'file-1')
+
+      expect(result).toEqual(mockPreview)
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/v1/collections/test-collection/documents/file-1/preview',
+        expect.objectContaining({
+          method: 'GET',
+        })
+      )
+    })
+  })
+
+  describe('downloadFile', () => {
+    test('downloads file blob and parses filename from response headers', async () => {
+      const blob = new Blob(['pdf-data'], { type: 'application/pdf' })
+
+      mockFetch.mockResolvedValue({
+        ok: true,
+        blob: () => Promise.resolve(blob),
+        headers: new Headers({
+          'content-disposition': 'attachment; filename="report.pdf"',
+          'content-type': 'application/pdf',
+        }),
+      })
+
+      const client = createDocumentsClient()
+      const result = await client.downloadFile('test-collection', 'file-1')
+
+      expect(result).toEqual({
+        blob,
+        fileName: 'report.pdf',
+        contentType: 'application/pdf',
+      })
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/v1/collections/test-collection/documents/file-1/download',
+        expect.objectContaining({
+          method: 'GET',
+          headers: {},
+        })
+      )
+    })
+
+    test('handles download errors', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        statusText: 'Not Found',
+        json: () => Promise.resolve({ error: { message: 'Original uploaded file is not available for download' } }),
+      })
+
+      const client = createDocumentsClient()
+
+      await expect(client.downloadFile('test-collection', 'missing')).rejects.toThrow(
+        'Original uploaded file is not available for download'
+      )
     })
   })
 

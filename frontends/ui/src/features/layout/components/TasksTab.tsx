@@ -23,7 +23,10 @@ import { TaskCard } from './TaskCard'
  * Uses deepResearchTodos from the store (populated by SSE artifact.update events).
  */
 export const TasksTab: FC = () => {
-  const { deepResearchTodos, deepResearchJobId, currentStatus, isDeepResearchStreaming } = useChatStore()
+  const deepResearchTodos = useChatStore((state) => state.deepResearchTodos)
+  const deepResearchJobId = useChatStore((state) => state.deepResearchJobId)
+  const currentStatus = useChatStore((state) => state.currentStatus)
+  const isDeepResearchStreaming = useChatStore((state) => state.isDeepResearchStreaming)
 
   const isEmpty = deepResearchTodos.length === 0
 

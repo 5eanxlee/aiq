@@ -44,14 +44,12 @@ interface ChatAreaProps {
  * Shows welcome state when no messages exist.
  */
 export const ChatArea: FC<ChatAreaProps> = ({ isAuthenticated = false, onSignIn }) => {
-  const {
-    currentConversation,
-    respondToPrompt,
-    getThinkingStepsForMessage,
-    isStreaming,
-    currentUserMessageId,
-    dismissErrorCard,
-  } = useChatStore()
+  const currentConversation = useChatStore((state) => state.currentConversation)
+  const respondToPrompt = useChatStore((state) => state.respondToPrompt)
+  const getThinkingStepsForMessage = useChatStore((state) => state.getThinkingStepsForMessage)
+  const isStreaming = useChatStore((state) => state.isStreaming)
+  const currentUserMessageId = useChatStore((state) => state.currentUserMessageId)
+  const dismissErrorCard = useChatStore((state) => state.dismissErrorCard)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const messages = currentConversation?.messages ?? []

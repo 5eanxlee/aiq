@@ -21,11 +21,13 @@ import { useLayoutStore } from '@/features/layout/store'
 import type { TrackedFile } from '../types'
 import { validateFileUpload, type ValidationContext } from '../validation'
 import { UploadOrchestrator } from '../orchestrator'
+import { cacheUploadedFiles, linkCachedFileToServerId, removeCachedUploadedFiles } from '../file-cache'
 import { markSessionHasCollection } from '../persistence'
 import { useChatStore } from '@/features/chat'
 
 interface UseFileUploadOptions {
   sessionId?: string
+  collectionName?: string
   onComplete?: () => void
   onError?: (error: Error) => void
 }
@@ -45,7 +47,8 @@ interface UseFileUploadReturn {
 }
 
 export const useFileUpload = (options: UseFileUploadOptions = {}): UseFileUploadReturn => {
-  const { sessionId, onComplete, onError } = options
+  const { sessionId, collectionName, onComplete, onError } = options
+  const resolvedCollectionName = collectionName ?? sessionId
 
   const { idToken } = useAuth()
   const { fileUpload: fileUploadConfig } = useAppConfig()
@@ -69,8 +72,11 @@ export const useFileUpload = (options: UseFileUploadOptions = {}): UseFileUpload
   } = useDocumentsStore()
 
   const sessionFiles = useMemo(
-    () => (sessionId ? trackedFiles.filter((f) => f.collectionName === sessionId) : []),
-    [trackedFiles, sessionId]
+    () =>
+      resolvedCollectionName
+        ? trackedFiles.filter((f) => f.collectionName === resolvedCollectionName)
+        : [],
+    [trackedFiles, resolvedCollectionName]
   )
 
   const validationContext: ValidationContext = useMemo(
@@ -94,11 +100,11 @@ export const useFileUpload = (options: UseFileUploadOptions = {}): UseFileUpload
   useEffect(() => {
     const previousSessionId = previousSessionIdRef.current
 
-    if (sessionId !== previousSessionId) {
-      UploadOrchestrator.handleSessionChange(sessionId)
-      previousSessionIdRef.current = sessionId
+    if (resolvedCollectionName !== previousSessionId) {
+      UploadOrchestrator.handleSessionChange(resolvedCollectionName)
+      previousSessionIdRef.current = resolvedCollectionName
     }
-  }, [sessionId])
+  }, [resolvedCollectionName])
 
   // Retry file loading when knowledgeLayerAvailable becomes true.
   // On browser refresh, the initial loadFilesForSession call may fire before
@@ -107,10 +113,10 @@ export const useFileUpload = (options: UseFileUploadOptions = {}): UseFileUpload
   // once the knowledge layer is confirmed available.
   const knowledgeLayerAvailable = useLayoutStore((state) => state.knowledgeLayerAvailable)
   useEffect(() => {
-    if (knowledgeLayerAvailable && sessionId) {
-      UploadOrchestrator.loadFilesForSession(sessionId)
+    if (knowledgeLayerAvailable && resolvedCollectionName) {
+      UploadOrchestrator.loadFilesForSession(resolvedCollectionName)
     }
-  }, [knowledgeLayerAvailable, sessionId])
+  }, [knowledgeLayerAvailable, resolvedCollectionName])
 
   // Note: We intentionally don't cleanup the orchestrator on unmount.
   // The orchestrator is a singleton that manages polling across component lifecycles.
@@ -138,11 +144,11 @@ export const useFileUpload = (options: UseFileUploadOptions = {}): UseFileUpload
   )
 
   const uploadFiles = useCallback(
-    async (files: File[], targetSessionId?: string) => {
+    async (files: File[], targetCollectionName?: string) => {
       if (files.length === 0) return
 
-      const collectionName = targetSessionId || sessionId
-      if (!collectionName) {
+      const targetCollection = targetCollectionName || resolvedCollectionName
+      if (!targetCollection) {
         const uploadError = new Error('Session ID required for upload')
         setError(uploadError.message)
         onError?.(uploadError)
@@ -186,7 +192,7 @@ export const useFileUpload = (options: UseFileUploadOptions = {}): UseFileUpload
           fileSize: file.size,
           status: 'uploading',
           progress: 0,
-          collectionName,
+          collectionName: targetCollection,
           uploadedAt: new Date().toISOString(),
         }
         addTrackedFile(trackedFile)
@@ -195,17 +201,19 @@ export const useFileUpload = (options: UseFileUploadOptions = {}): UseFileUpload
 
       // Show informational banner in chat as soon as upload starts
       const chatStore = useChatStore.getState()
+      const bannerSessionId = chatStore.currentConversation?.id ?? sessionId
       chatStore.addFileUploadStatusCard(
         'uploaded',
         validFiles.length,
         `upload-${Date.now()}`,
-        collectionName
+        bannerSessionId
       )
 
       try {
-        await ensureCollectionExists(collectionName)
+        void cacheUploadedFiles(targetCollection, validFiles)
+        await ensureCollectionExists(targetCollection)
 
-        const { job_id, file_ids } = await clientRef.current.uploadFiles(collectionName, validFiles)
+        const { job_id, file_ids } = await clientRef.current.uploadFiles(targetCollection, validFiles)
 
         // Upload POST response means upload is complete and ingestion has started
         // Set status to 'ingesting' immediately
@@ -226,10 +234,13 @@ export const useFileUpload = (options: UseFileUploadOptions = {}): UseFileUpload
               jobId: job_id,
             })
             filesToPersist.push(updatedFile)
+            if (file_ids[index]) {
+              void linkCachedFileToServerId(targetCollection, file.name, file_ids[index])
+            }
           }
         })
 
-        UploadOrchestrator.startPolling(job_id, collectionName, filesToPersist)
+        UploadOrchestrator.startPolling(job_id, targetCollection, filesToPersist)
       } catch (err) {
         if (err instanceof Error && err.name === 'AbortError') {
           return
@@ -250,7 +261,7 @@ export const useFileUpload = (options: UseFileUploadOptions = {}): UseFileUpload
       }
     },
     [
-      sessionId,
+      resolvedCollectionName,
       validationContext,
       fileUploadConfig,
       ensureCollectionExists,
@@ -276,7 +287,7 @@ export const useFileUpload = (options: UseFileUploadOptions = {}): UseFileUpload
         return
       }
 
-      const collectionName = file.collectionName
+      const targetCollectionName = file.collectionName
       const deleteId = file.serverFileId || file.fileName
 
       // Optimistic delete: remove from UI immediately, call API in background.
@@ -285,7 +296,8 @@ export const useFileUpload = (options: UseFileUploadOptions = {}): UseFileUpload
       removeTrackedFile(fileId)
 
       try {
-        await clientRef.current.deleteFiles(collectionName, [deleteId])
+        await clientRef.current.deleteFiles(targetCollectionName, [deleteId])
+        void removeCachedUploadedFiles(targetCollectionName, [deleteId, file.fileName])
       } catch (err) {
         // Restore the file on failure so the user can retry.
         // Also undo the recentlyDeletedIds entry so the file isn't

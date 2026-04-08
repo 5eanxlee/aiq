@@ -4,168 +4,430 @@
 /**
  * SettingsPanel Component
  *
- * Right-side panel for application settings.
- * Includes appearance/theme settings and provider readiness status.
+ * Right-side panel for application preferences.
+ * Keeps runtime provider health out of settings so this panel can focus on
+ * appearance and configuration selection.
  */
 
 'use client'
 
-import { type FC, useCallback, useEffect, useMemo, useState } from 'react'
-import { Banner, Button, Flex, SidePanel, Select, Text } from '@/adapters/ui'
-import { Refresh, Settings } from '@/adapters/ui/icons'
-import { useAuth } from '@/adapters/auth'
+import { type FC, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Banner, Button, Flex, SegmentedControl, SidePanel, Switch, Text, TextInput } from '@/adapters/ui'
+import { Settings } from '@/adapters/ui/icons'
 import {
+  checkBackendHealth,
   createProviderStatusClient,
-  type ProviderDashboardFromAPI,
-  type ProviderStatusFromAPI,
-  type RuntimeModelObservationFromAPI,
-  type WorkerLLMConfigFromAPI,
-  type WorkerStatusFromAPI,
+  type LocalResearchOptionsFromAPI,
 } from '@/adapters/api'
-import { formatTime } from '@/shared/utils/format-time'
+import { useAuth } from '@/adapters/auth'
 import { useLayoutStore } from '../store'
-import type { ThemeMode } from '../types'
+import {
+  CodeDetailBlock,
+  formatConfigPathLabel,
+  getConfigDisplayMeta,
+  getConfigKindLabel,
+  getDisplayConfigName,
+  looksLikeGeneratedRuntimeConfig,
+  StatusPill,
+  type PillTone,
+  useProviderDashboardData,
+} from '../provider-dashboard'
 
-const getStatusLabel = (provider: ProviderStatusFromAPI): string => {
-  switch (provider.status) {
-    case 'ready':
-      return provider.active ? 'Ready' : 'Connected'
-    case 'limited':
-      return 'Limited'
-    case 'missing_config':
-      return 'Missing Config'
-    case 'error':
-      return 'Issue'
-    default:
-      return provider.active ? 'Active' : 'Inactive'
-  }
-}
+const MIN_PANEL_WIDTH = 340
+const MAX_PANEL_WIDTH = 720
+const DEFAULT_PANEL_WIDTH = 430
 
-const getStatusClassName = (provider: ProviderStatusFromAPI): string => {
-  switch (provider.status) {
-    case 'ready':
-      return 'text-green-700 dark:text-green-300'
-    case 'limited':
-      return 'text-yellow-700 dark:text-yellow-300'
-    case 'missing_config':
-      return 'text-yellow-700 dark:text-yellow-300'
-    case 'error':
-      return 'text-error'
-    default:
-      return 'text-subtle'
-  }
-}
+const useResizableWidth = (defaultWidth: number) => {
+  const [width, setWidth] = useState(defaultWidth)
+  const dragging = useRef(false)
 
-const formatQuotaSummary = (provider: ProviderStatusFromAPI): string => {
-  const quota = provider.quota
+  const onMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    dragging.current = true
+    const startX = e.clientX
+    const startWidth = width
 
-  if (!provider.configured) {
-    return 'Configuration missing'
-  }
-
-  if (quota.supported) {
-    if (typeof quota.remaining === 'number') {
-      const unit = quota.unit ?? 'credits'
-      const rateLimit =
-        typeof quota.rate_limit === 'number' ? ` · ${quota.rate_limit}/s rate limit` : ''
-      return `${quota.remaining.toLocaleString()} ${unit} remaining${rateLimit}`
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      if (!dragging.current) return
+      const delta = startX - moveEvent.clientX
+      setWidth(Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, startWidth + delta)))
     }
-    if (typeof quota.limit === 'number' && typeof quota.used === 'number') {
-      const unit = quota.unit ?? 'credits'
-      return `${quota.used.toLocaleString()} / ${quota.limit.toLocaleString()} ${unit} used`
+
+    const onMouseUp = () => {
+      dragging.current = false
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
     }
-  }
 
-  if (quota.message) {
-    return quota.message
-  }
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  }, [width])
 
-  if (provider.connected) {
-    return 'Connected'
-  }
-
-  return 'Status unavailable'
+  return { width, onMouseDown }
 }
 
-const formatModelSettings = (config: {
-  temperature?: number | null
-  top_p?: number | null
-  max_tokens?: number | null
-}): string | null => {
-  const parts: string[] = []
-
-  if (typeof config.temperature === 'number') {
-    parts.push(`temp ${config.temperature}`)
-  }
-  if (typeof config.top_p === 'number') {
-    parts.push(`top_p ${config.top_p}`)
-  }
-  if (typeof config.max_tokens === 'number') {
-    parts.push(`max_tokens ${config.max_tokens.toLocaleString()}`)
-  }
-
-  return parts.length > 0 ? parts.join(' · ') : null
+interface ConfigDetailModel {
+  name: string
+  role: string
+  reasoning_effort?: string
 }
 
-const formatWorkerConfigSummary = (llm: WorkerLLMConfigFromAPI): string => {
-  const model = llm.model_name ?? llm.llm_ref
-  const settings = formatModelSettings(llm)
-  return settings ? `${model} · ${settings}` : model
+const CONFIG_DETAIL_MAP: Record<string, { models: ConfigDetailModel[] }> = {
+  'configs/config_preset_frontier_gpt54_xhigh.yml': {
+    models: [
+      { name: 'gpt-5.4', role: 'Planner / Orchestrator', reasoning_effort: 'xhigh' },
+      { name: 'nvidia/nemotron-3-nano-30b-a3b', role: 'Research Worker' },
+      { name: 'nvidia/nemotron-mini-4b-instruct', role: 'Summary' },
+    ],
+  },
+  'configs/config_preset_frontier_gpt54_xhigh_super.yml': {
+    models: [
+      { name: 'gpt-5.4', role: 'Planner / Orchestrator', reasoning_effort: 'xhigh' },
+      { name: 'nvidia/llama-3.3-nemotron-super-49b-v1.5', role: 'Research Worker' },
+      { name: 'nvidia/nemotron-3-nano-30b-a3b', role: 'Intent / Clarifier' },
+      { name: 'nvidia/nemotron-mini-4b-instruct', role: 'Summary' },
+    ],
+  },
+  'configs/config_preset_max_quality.yml': {
+    models: [
+      { name: 'gpt-5.4', role: 'Planner / Orchestrator', reasoning_effort: 'xhigh' },
+      { name: 'nvidia/llama-3.1-nemotron-ultra-253b-v1', role: 'Research Worker' },
+      { name: 'nvidia/nemotron-3-nano-30b-a3b', role: 'Intent / Clarifier' },
+      { name: 'nvidia/nemotron-mini-4b-instruct', role: 'Summary' },
+    ],
+  },
+  'configs/config_preset_nvidia_super_only.yml': {
+    models: [
+      { name: 'nvidia/llama-3.3-nemotron-super-49b-v1.5', role: 'Planner / Research Worker' },
+      { name: 'nvidia/nemotron-3-nano-30b-a3b', role: 'Intent / Clarifier' },
+      { name: 'nvidia/nemotron-mini-4b-instruct', role: 'Summary' },
+    ],
+  },
+  'configs/config_preset_current_setup.yml': {
+    models: [
+      { name: 'openai/gpt-oss-120b', role: 'Planner / Orchestrator' },
+      { name: 'nvidia/nemotron-3-nano-30b-a3b', role: 'Research Worker' },
+      { name: 'nvidia/nemotron-mini-4b-instruct', role: 'Summary' },
+    ],
+  },
+  'configs/config_web_default_llamaindex.yml': {
+    models: [
+      { name: 'openai/gpt-oss-120b', role: 'Planner / Orchestrator' },
+      { name: 'nvidia/nemotron-3-nano-30b-a3b', role: 'Research Worker' },
+      { name: 'nvidia/nemotron-mini-4b-instruct', role: 'Summary' },
+    ],
+  },
+  'configs/config_frontier_models.yml': {
+    models: [
+      { name: 'gpt-5.2', role: 'Planner / Orchestrator' },
+      { name: 'nvidia/nemotron-3-nano-30b-a3b', role: 'Research Worker' },
+      { name: 'nvidia/nemotron-mini-4b-instruct', role: 'Summary' },
+    ],
+  },
+  'configs/config_web_frag.yml': {
+    models: [
+      { name: 'openai/gpt-oss-120b', role: 'Planner / Orchestrator' },
+      { name: 'nvidia/nemotron-3-nano-30b-a3b', role: 'Research Worker' },
+    ],
+  },
 }
 
-const formatRuntimeCallSummary = (call: RuntimeModelObservationFromAPI): string => {
-  const settings = formatModelSettings(call)
-  const pieces = [`${call.call_count} call${call.call_count === 1 ? '' : 's'}`]
-
-  if (typeof call.total_tokens === 'number') {
-    pieces.push(`${call.total_tokens.toLocaleString()} tokens`)
+const getConfigTone = ({
+  kind,
+  recommended,
+  active,
+}: {
+  kind?: string | null
+  recommended?: boolean
+  active?: boolean
+}): PillTone => {
+  if (active) {
+    return 'success'
   }
-  if (settings) {
-    pieces.push(settings)
+  if (recommended) {
+    return 'accent'
   }
-
-  return pieces.join(' · ')
+  if (kind === 'repo_config') {
+    return 'neutral'
+  }
+  return 'warning'
 }
 
-const getObservedModelsSummary = (provider: ProviderStatusFromAPI): string | null => {
-  const uniqueModels = Array.from(new Set(provider.runtime_calls.map((call) => call.model_name).filter(Boolean)))
-  return uniqueModels.length > 0 ? uniqueModels.join(', ') : null
+const CurrentConfigCard = ({
+  title,
+  models,
+  statusLabel,
+  tone,
+  pathLabel,
+  pathValue,
+}: {
+  title: string
+  models: string[]
+  statusLabel: string
+  tone: PillTone
+  pathLabel?: string | null
+  pathValue?: string | null
+}) => (
+  <div className="py-4">
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="min-w-0">
+        <Text kind="label/semibold/xs" className="block text-subtle uppercase tracking-[0.08em]">
+          Current Research Setup
+        </Text>
+        <Text kind="label/semibold/sm" className="mt-2 block text-primary leading-6">
+          {title}
+        </Text>
+      </div>
+      <StatusPill tone={tone}>{statusLabel}</StatusPill>
+    </div>
+
+    {models.length > 0 && (
+      <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1">
+        {models.map((model) => (
+          <code key={model} className="text-[11px] leading-5 text-subtle">{model}</code>
+        ))}
+      </div>
+    )}
+
+    {pathValue && pathLabel && (
+      <div className="mt-3">
+        <CodeDetailBlock label={pathLabel} value={pathValue} />
+      </div>
+    )}
+  </div>
+)
+
+const ConfigOptionCard = ({
+  title,
+  kindLabel,
+  configPath,
+  description,
+  recommended,
+  active,
+  selected,
+  expanded,
+  onSelect,
+}: {
+  title: string
+  kindLabel: string
+  configPath: string
+  description: string
+  recommended: boolean
+  active: boolean
+  selected: boolean
+  expanded: boolean
+  onSelect: () => void
+}) => {
+  const detail = CONFIG_DETAIL_MAP[configPath]
+
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={`border-base w-full border-b py-3 text-left transition first:border-t ${
+        selected
+          ? 'bg-surface-raised/40'
+          : 'hover:bg-surface-raised/50'
+      }`}
+      aria-pressed={selected}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <Text kind="label/semibold/sm" className="block text-primary leading-6">
+            {title}
+          </Text>
+          {active && (
+            <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-emerald-600 dark:text-emerald-400">
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              Live
+            </span>
+          )}
+          {recommended && !active && (
+            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-primary/50">
+              Rec
+            </span>
+          )}
+          {selected && !active && (
+            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#76b900]">
+              Sel
+            </span>
+          )}
+        </div>
+        <StatusPill tone={getConfigTone({ kind: kindLabel === 'Workflow Config' ? 'repo_config' : 'preset', recommended, active })}>
+          {kindLabel}
+        </StatusPill>
+      </div>
+
+      {expanded && (
+        <div className="mt-2.5 space-y-2">
+          <Text kind="body/regular/xs" className="block text-subtle leading-5">
+            {description}
+          </Text>
+
+          {detail && (
+            <div className="space-y-1">
+              {detail.models.map((model) => (
+                <div key={`${model.name}-${model.role}`} className="flex items-baseline justify-between gap-2">
+                  <code className="text-[11px] leading-5 text-primary">{model.name}</code>
+                  <div className="flex items-center gap-2">
+                    {model.reasoning_effort && (
+                      <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-amber-600 dark:text-amber-400">
+                        {model.reasoning_effort}
+                      </span>
+                    )}
+                    <span className="shrink-0 text-[10px] text-subtle">{model.role}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </button>
+  )
 }
 
-/**
- * Settings panel for application preferences.
- * Opens from the right side of the screen.
- */
+type ConfigPanelTab = 'model' | 'options'
+
+interface DraftResearchOptions {
+  knowledgeLayerEnabled: boolean
+  generateSummary: boolean
+  topK: string
+}
+
+const ConfigOptionRow = ({
+  title,
+  description,
+  control,
+}: {
+  title: string
+  description: string
+  control: ReactNode
+}) => (
+  <div className="border-base rounded-xl border px-4 py-3">
+    <div className="flex items-start justify-between gap-4">
+      <div className="min-w-0">
+        <Text kind="label/semibold/sm" className="block text-primary">
+          {title}
+        </Text>
+        <Text kind="body/regular/xs" className="mt-1 block text-subtle leading-5">
+          {description}
+        </Text>
+      </div>
+      <div className="shrink-0">{control}</div>
+    </div>
+  </div>
+)
+
+const toDraftResearchOptions = (
+  options: Pick<LocalResearchOptionsFromAPI, 'knowledge_layer_enabled' | 'generate_summary' | 'top_k'>
+): DraftResearchOptions => ({
+  knowledgeLayerEnabled: options.knowledge_layer_enabled,
+  generateSummary: options.generate_summary,
+  topK: String(options.top_k),
+})
+
 export const SettingsPanel: FC = () => {
   const { idToken } = useAuth()
-  const { rightPanel, closeRightPanel, openRightPanel, theme, setTheme } = useLayoutStore()
-  const [providerStatus, setProviderStatus] = useState<ProviderDashboardFromAPI | null>(null)
-  const [providersLoading, setProvidersLoading] = useState(false)
-  const [providersError, setProvidersError] = useState<string | null>(null)
+  const { rightPanel, closeRightPanel, openRightPanel } = useLayoutStore()
+  const { providerStatus, loading, error, loadProviderStatus, presetOptions, sortedWorkers } = useProviderDashboardData({
+    enabled: rightPanel === 'settings',
+    autoRefreshMs: 0,
+  })
+
+  const [selectedPresetPath, setSelectedPresetPath] = useState('')
+  const [configTab, setConfigTab] = useState<ConfigPanelTab>('model')
+  const [applyMessage, setApplyMessage] = useState<string | null>(null)
+  const [applyError, setApplyError] = useState<string | null>(null)
+  const [presetApplying, setPresetApplying] = useState(false)
+  const [optionsLoading, setOptionsLoading] = useState(false)
+  const [optionsApplying, setOptionsApplying] = useState(false)
+  const [optionsError, setOptionsError] = useState<string | null>(null)
+  const [researchOptions, setResearchOptions] = useState<LocalResearchOptionsFromAPI | null>(null)
+  const [draftOptions, setDraftOptions] = useState<DraftResearchOptions>({
+    knowledgeLayerEnabled: false,
+    generateSummary: false,
+    topK: '5',
+  })
+  const [reloadPending, setReloadPending] = useState(false)
+  const [reloadOperationId, setReloadOperationId] = useState<string | null>(null)
+  const { width: panelWidth, onMouseDown: onResizeMouseDown } = useResizableWidth(DEFAULT_PANEL_WIDTH)
 
   const isOpen = rightPanel === 'settings'
+  const currentPresetPath = providerStatus?.config_runtime?.current_config_path ?? ''
+  const canApplyPresets = providerStatus?.config_runtime?.can_apply_presets ?? false
 
-  const loadProviderStatus = useCallback(
+  const currentPreset = useMemo(() => {
+    const configRuntime = providerStatus?.config_runtime
+    if (!configRuntime) {
+      return null
+    }
+
+    return (
+      presetOptions.find((preset) => preset.id === configRuntime.current_preset_id) ??
+      presetOptions.find((preset) => preset.config_path === configRuntime.current_config_path) ??
+      presetOptions.find((preset) => preset.current) ??
+      null
+    )
+  }, [presetOptions, providerStatus])
+
+  const activePresetPath = currentPreset?.config_path ?? currentPresetPath
+
+  const liveModels = useMemo(() => {
+    const modelSet = new Set<string>()
+    for (const worker of sortedWorkers) {
+      for (const llm of worker.llms) {
+        if (llm.model_name) modelSet.add(llm.model_name)
+      }
+      for (const call of worker.runtime_calls) {
+        if (call.model_name) modelSet.add(call.model_name)
+      }
+    }
+    for (const provider of providerStatus?.providers ?? []) {
+      for (const model of provider.models) {
+        modelSet.add(model)
+      }
+    }
+    return Array.from(modelSet)
+  }, [sortedWorkers, providerStatus])
+
+  useEffect(() => {
+    if (presetOptions.length === 0) {
+      return
+    }
+
+    setSelectedPresetPath((current) => {
+      if (current && presetOptions.some((preset) => preset.config_path === current)) {
+        return current
+      }
+
+      const currentOption = presetOptions.find((preset) => preset.current)
+      return currentOption?.config_path ?? presetOptions[0]?.config_path ?? current
+    })
+  }, [presetOptions])
+
+  const loadResearchOptions = useCallback(
     async (signal?: AbortSignal, options?: { silent?: boolean }) => {
       if (!options?.silent) {
-        setProvidersLoading(true)
+        setOptionsLoading(true)
       }
-      setProvidersError(null)
+      setOptionsError(null)
 
       try {
         const client = createProviderStatusClient({ authToken: idToken || undefined })
-        const response = await client.getProviderStatus(signal)
-        setProviderStatus(response)
-      } catch (error) {
+        const response = await client.getLocalResearchOptions(signal)
+        setResearchOptions(response)
+        setDraftOptions(toDraftResearchOptions(response))
+      } catch (loadError) {
         if (signal?.aborted) {
           return
         }
-        setProvidersError(
-          error instanceof Error ? error.message : 'Failed to load provider status'
+        setOptionsError(
+          loadError instanceof Error ? loadError.message : 'Failed to load local research options'
         )
       } finally {
         if (!options?.silent) {
-          setProvidersLoading(false)
+          setOptionsLoading(false)
         }
       }
     },
@@ -178,26 +440,87 @@ export const SettingsPanel: FC = () => {
     }
 
     const controller = new AbortController()
-    void loadProviderStatus(controller.signal)
+    void loadResearchOptions(controller.signal)
 
     return () => {
       controller.abort()
     }
-  }, [isOpen, loadProviderStatus])
+  }, [isOpen, loadResearchOptions])
 
   useEffect(() => {
-    if (!isOpen) {
+    if (!reloadPending) {
       return
     }
 
-    const intervalId = window.setInterval(() => {
-      void loadProviderStatus(undefined, { silent: true })
-    }, 10000)
+    let cancelled = false
+    let timeoutId: number | null = null
+
+    const pollReloadStatus = async () => {
+      if (cancelled) {
+        return
+      }
+
+      try {
+        const client = createProviderStatusClient({ authToken: idToken || undefined })
+        const status = await client.getLocalConfigReloadStatus()
+        const isCurrentOperation =
+          !reloadOperationId || !status.operation_id || status.operation_id === reloadOperationId
+
+        if (isCurrentOperation && status.message) {
+          setApplyMessage(status.message)
+        }
+
+        if (!isCurrentOperation) {
+          timeoutId = window.setTimeout(() => {
+            void pollReloadStatus()
+          }, 1500)
+          return
+        }
+
+        if (status.state === 'ready') {
+          const healthy = await checkBackendHealth()
+          if (healthy) {
+            window.location.reload()
+            return
+          }
+        }
+
+        if (status.state === 'rolled_back' || status.state === 'failed') {
+          setReloadPending(false)
+          setReloadOperationId(null)
+          setApplyError(status.error ? `${status.message} ${status.error}` : status.message)
+          setSelectedPresetPath(status.previous_config_path ?? activePresetPath)
+          void loadProviderStatus(undefined, { silent: true })
+          void loadResearchOptions(undefined, { silent: true })
+          return
+        }
+      } catch (statusError) {
+        setReloadPending(false)
+        setReloadOperationId(null)
+        setApplyError(
+          statusError instanceof Error
+            ? statusError.message
+            : 'The backend reload status could not be read from the local frontend.'
+        )
+        return
+      }
+
+      timeoutId = window.setTimeout(() => {
+        void pollReloadStatus()
+      }, 1500)
+    }
+
+    timeoutId = window.setTimeout(() => {
+      void pollReloadStatus()
+    }, 800)
 
     return () => {
-      window.clearInterval(intervalId)
+      cancelled = true
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId)
+      }
     }
-  }, [isOpen, loadProviderStatus])
+  }, [activePresetPath, idToken, loadProviderStatus, loadResearchOptions, reloadOperationId, reloadPending])
 
   const handleOpenChange = useCallback(
     (open: boolean) => {
@@ -207,32 +530,125 @@ export const SettingsPanel: FC = () => {
         closeRightPanel()
       }
     },
-    [openRightPanel, closeRightPanel]
+    [closeRightPanel, openRightPanel]
   )
 
-  const handleThemeChange = useCallback(
-    (value: string) => {
-      setTheme(value as ThemeMode)
-    },
-    [setTheme]
-  )
+  const handleConfigTabChange = useCallback((value: string) => {
+    setConfigTab(value as ConfigPanelTab)
+  }, [])
 
-  const sortedProviders = useMemo(() => {
-    return [...(providerStatus?.providers ?? [])].sort((left, right) => {
-      if (left.active !== right.active) {
-        return left.active ? -1 : 1
+  const handlePresetApply = useCallback(async () => {
+    if (!selectedPresetPath) {
+      return
+    }
+
+    setPresetApplying(true)
+    setApplyError(null)
+    setApplyMessage(null)
+    setReloadPending(false)
+    setReloadOperationId(null)
+
+    try {
+      const client = createProviderStatusClient({ authToken: idToken || undefined })
+      const response = await client.applyConfigPreset(selectedPresetPath)
+      setApplyMessage(response.message)
+      setReloadOperationId(response.operation_id ?? null)
+      setReloadPending(Boolean(response.operation_id))
+
+      if (!response.operation_id) {
+        void loadProviderStatus(undefined, { silent: true })
+        void loadResearchOptions(undefined, { silent: true })
       }
-      return left.name.localeCompare(right.name)
-    })
-  }, [providerStatus])
+    } catch (applyError) {
+      setApplyError(applyError instanceof Error ? applyError.message : 'Failed to apply config preset')
+    } finally {
+      setPresetApplying(false)
+    }
+  }, [idToken, loadProviderStatus, loadResearchOptions, selectedPresetPath])
 
-  const sortedWorkers = useMemo(() => {
-    return [...(providerStatus?.workers ?? [])].sort((left, right) => left.name.localeCompare(right.name))
-  }, [providerStatus])
+  const handleOptionsApply = useCallback(async () => {
+    const parsedTopK = Number(draftOptions.topK)
+    if (!researchOptions || !Number.isInteger(parsedTopK) || parsedTopK < 1 || parsedTopK > 50) {
+      return
+    }
+
+    setOptionsApplying(true)
+    setOptionsError(null)
+    setApplyError(null)
+    setApplyMessage(null)
+    setReloadPending(false)
+    setReloadOperationId(null)
+
+    try {
+      const client = createProviderStatusClient({ authToken: idToken || undefined })
+      const response = await client.applyLocalResearchOptions({
+        knowledge_layer_enabled: draftOptions.knowledgeLayerEnabled,
+        generate_summary: draftOptions.generateSummary,
+        top_k: parsedTopK,
+      })
+
+      setApplyMessage(response.message)
+      if (response.options) {
+        setResearchOptions(response.options)
+        setDraftOptions(toDraftResearchOptions(response.options))
+      }
+      setReloadOperationId(response.operation_id ?? null)
+      setReloadPending(Boolean(response.operation_id))
+
+      if (!response.operation_id) {
+        void loadProviderStatus(undefined, { silent: true })
+        void loadResearchOptions(undefined, { silent: true })
+      }
+    } catch (nextError) {
+      setApplyError(
+        nextError instanceof Error ? nextError.message : 'Failed to apply local research options'
+      )
+    } finally {
+      setOptionsApplying(false)
+    }
+  }, [draftOptions, idToken, loadProviderStatus, loadResearchOptions, researchOptions])
+
+  const currentConfigCard = useMemo(() => {
+    const configRuntime = providerStatus?.config_runtime
+    if (!configRuntime) {
+      return null
+    }
+
+    const generated =
+      looksLikeGeneratedRuntimeConfig(configRuntime.current_config_name) ||
+      looksLikeGeneratedRuntimeConfig(configRuntime.current_config_path)
+
+    return {
+      title: getDisplayConfigName({ configRuntime, currentPreset }),
+      statusLabel: currentPreset ? getConfigKindLabel(currentPreset) : generated ? 'Generated Runtime' : 'Workflow Config',
+      tone: (currentPreset
+        ? getConfigTone({
+            kind: currentPreset.kind,
+            recommended: currentPreset.recommended,
+            active: true,
+          })
+        : generated
+          ? 'warning'
+          : 'neutral') as PillTone,
+      pathLabel: formatConfigPathLabel(configRuntime.current_config_path),
+      pathValue: configRuntime.current_config_path ?? null,
+    }
+  }, [currentPreset, providerStatus])
+
+  const parsedTopK = Number(draftOptions.topK)
+  const topKIsValid = Number.isInteger(parsedTopK) && parsedTopK >= 1 && parsedTopK <= 50
+  const optionsDirty =
+    !!researchOptions &&
+    (
+      draftOptions.knowledgeLayerEnabled !== researchOptions.knowledge_layer_enabled ||
+      draftOptions.generateSummary !== researchOptions.generate_summary ||
+      parsedTopK !== researchOptions.top_k
+    )
 
   return (
     <SidePanel
-      className="bg-surface-base top-[var(--header-height)] h-[calc(100vh-var(--header-height))] w-[400px] rounded-l-2xl"
+      className="bg-surface-base top-[var(--header-height)] h-[calc(100vh-var(--header-height))] rounded-l-2xl"
+      style={{ width: panelWidth }}
       open={isOpen}
       onOpenChange={handleOpenChange}
       side="right"
@@ -241,240 +657,286 @@ export const SettingsPanel: FC = () => {
       slotHeading={
         <Flex align="center" gap="2">
           <Settings className="h-5 w-5" />
-          Settings
+          Config
         </Flex>
       }
       slotFooter={
         <Text kind="body/regular/xs" className="text-subtle">
-          Settings are saved automatically.
+          Model and option changes write runtime config updates and reload the local backend workflow.
         </Text>
       }
     >
-      {/* Appearance Section */}
-      <Flex direction="col" gap="6">
-        <Text kind="label/semibold/xs" className="text-subtle uppercase">
-          UI Theme Options
-        </Text>
+      {/* Resize handle */}
+      <div
+        onMouseDown={onResizeMouseDown}
+        className="absolute left-0 top-0 z-10 h-full w-1 cursor-col-resize hover:bg-primary/10 active:bg-primary/20"
+      />
 
-        <Select
-          value={theme}
-          onValueChange={handleThemeChange}
-          side="bottom"
+      <Flex direction="col" gap="6">
+        <SegmentedControl
+          value={configTab}
+          onValueChange={handleConfigTabChange}
+          size="small"
+          className="w-full"
           items={[
-            { children: 'System Theme (Auto)', value: 'system' },
-            { children: 'Light', value: 'light' },
-            { children: 'Dark', value: 'dark' },
+            { value: 'model', children: 'Model' },
+            { value: 'options', children: 'Options' },
           ]}
         />
 
-        <Flex direction="col" gap="3">
-          <Flex align="center" justify="between">
-            <Text kind="label/semibold/xs" className="text-subtle uppercase">
-              Research Providers
-            </Text>
-            <Button
-              kind="tertiary"
-              size="small"
-              onClick={() => void loadProviderStatus()}
-              disabled={providersLoading}
-              aria-label="Refresh provider status"
-            >
-              <Refresh className="mr-2 h-4 w-4" />
-              Refresh
-            </Button>
-          </Flex>
+        {applyMessage && (
+          <Banner kind="inline" status="info" className="px-3 py-2">
+            {applyMessage}
+          </Banner>
+        )}
 
-          {providerStatus && (
-            <Banner
-              kind="inline"
-              status={providerStatus.can_run_research ? 'success' : 'warning'}
-              className="px-4 py-3"
-            >
-              {providerStatus.can_run_research
-                ? 'Research is ready to run with the current provider setup.'
-                : providerStatus.missing_requirements.join(' ')}
-            </Banner>
-          )}
+        {applyError && (
+          <Banner kind="inline" status="warning" className="px-3 py-2">
+            {applyError}
+          </Banner>
+        )}
 
-          {providersLoading ? (
-            <Text kind="body/regular/sm" className="text-subtle">
-              Loading provider status...
+        {configTab === 'model' ? (
+          loading ? (
+            <Text kind="body/regular/xs" className="text-subtle">
+              Loading configuration details...
             </Text>
-          ) : providersError ? (
+          ) : error ? (
             <Flex direction="col" gap="2">
-              <Text kind="body/regular/sm" className="text-error">
-                {providersError}
-              </Text>
-              <Button
-                kind="secondary"
-                size="small"
-                onClick={() => void loadProviderStatus()}
-                aria-label="Retry provider status"
-              >
-                Retry
-              </Button>
-            </Flex>
-          ) : sortedProviders.length > 0 ? (
-            <Flex direction="col" gap="3">
-              {sortedProviders.map((provider) => (
-                <div
-                  key={provider.id}
-                  className="border-base rounded-xl border px-4 py-3"
-                  data-testid={`provider-status-${provider.id}`}
-                >
-                  <Flex align="start" justify="between" gap="4">
-                    <Flex direction="col" gap="1" className="min-w-0">
-                      <Text kind="label/semibold/sm" className="text-primary">
-                        {provider.name}
-                      </Text>
-                      <Text kind="body/regular/xs" className="text-subtle">
-                        {provider.active ? 'Active in workflow' : 'Configured standby'}
-                        {provider.features.length > 0 ? ` · ${provider.features.join(' · ')}` : ''}
-                      </Text>
-                    </Flex>
-                    <Text
-                      kind="label/semibold/xs"
-                      className={`uppercase ${getStatusClassName(provider)}`}
-                    >
-                      {getStatusLabel(provider)}
-                    </Text>
-                  </Flex>
-
-                  {provider.models.length > 0 && (
-                    <Text kind="body/regular/xs" className="text-subtle mt-2 line-clamp-2">
-                      {provider.models.join(', ')}
-                    </Text>
-                  )}
-
-                  <Text kind="body/regular/sm" className="mt-3">
-                    {formatQuotaSummary(provider)}
-                  </Text>
-
-                  {getObservedModelsSummary(provider) && (
-                    <Text kind="body/regular/xs" className="text-subtle mt-1">
-                      Runtime observed: {getObservedModelsSummary(provider)}
-                    </Text>
-                  )}
-
-                  {provider.detail && (
-                    <Text kind="body/regular/xs" className="text-subtle mt-1">
-                      {provider.detail}
-                    </Text>
-                  )}
-
-                  {provider.endpoints.length > 0 && (
-                    <Text kind="body/regular/xs" className="text-subtle mt-1 truncate">
-                      {provider.endpoints[0]}
-                    </Text>
-                  )}
-                </div>
-              ))}
-            </Flex>
-          ) : (
-            <Text kind="body/regular/sm" className="text-subtle">
-              No active API providers detected for the current workflow.
-            </Text>
-          )}
-
-          {providerStatus && (
-            <Flex direction="col" gap="3">
-              <Text kind="label/semibold/xs" className="text-subtle uppercase">
-                Worker Models
+              <Text kind="body/regular/xs" className="text-error">
+                {error}
               </Text>
               <Text kind="body/regular/xs" className="text-subtle">
-                Runtime observations reflect actual model calls seen in the last{' '}
-                {providerStatus.runtime_window_minutes} minutes.
+                Provider health and worker activity are available from the Providers panel in the header once the backend reconnects.
               </Text>
-
-              {sortedWorkers.length > 0 ? (
-                <Flex direction="col" gap="3">
-                  {sortedWorkers.map((worker: WorkerStatusFromAPI) => (
-                    <div
-                      key={worker.id}
-                      className="border-base rounded-xl border px-4 py-3"
-                      data-testid={`worker-status-${worker.id}`}
-                    >
-                      <Flex align="start" justify="between" gap="4">
-                        <Flex direction="col" gap="1" className="min-w-0">
-                          <Text kind="label/semibold/sm" className="text-primary">
-                            {worker.name}
-                          </Text>
-                          <Text kind="body/regular/xs" className="text-subtle">
-                            {worker.runtime_calls.length > 0 ? 'Runtime observed' : 'Config only'}
-                          </Text>
-                        </Flex>
-                        {worker.last_runtime_at && (
-                          <Text kind="body/regular/xs" className="text-subtle">
-                            {formatTime(worker.last_runtime_at)}
-                          </Text>
-                        )}
-                      </Flex>
-
-                      <Flex direction="col" gap="2" className="mt-3">
-                        {worker.llms.map((llm) => (
-                          <div
-                            key={`${worker.id}-${llm.role}-${llm.llm_ref}`}
-                            className="bg-surface-raised rounded-lg px-3 py-2"
-                          >
-                            <Text kind="label/semibold/xs" className="text-subtle uppercase">
-                              {llm.role}
-                            </Text>
-                            <Text kind="body/regular/sm" className="mt-1">
-                              {formatWorkerConfigSummary(llm)}
-                            </Text>
-                            {llm.endpoint && (
-                              <Text kind="body/regular/xs" className="text-subtle mt-1 truncate">
-                                {llm.endpoint}
-                              </Text>
-                            )}
-                          </div>
-                        ))}
-                      </Flex>
-
-                      {worker.runtime_calls.length > 0 ? (
-                        <Flex direction="col" gap="2" className="mt-3">
-                          <Text kind="label/semibold/xs" className="text-subtle uppercase">
-                            Observed At Runtime
-                          </Text>
-                          {worker.runtime_calls.map((call) => (
-                            <div
-                              key={`${worker.id}-${call.model_name}-${call.last_seen_at}`}
-                              className="bg-surface-raised rounded-lg px-3 py-2"
-                            >
-                              <Text kind="body/regular/sm">{call.model_name}</Text>
-                              <Text kind="body/regular/xs" className="text-subtle mt-1">
-                                {formatRuntimeCallSummary(call)}
-                              </Text>
-                              {call.endpoint && (
-                                <Text kind="body/regular/xs" className="text-subtle mt-1 truncate">
-                                  {call.endpoint}
-                                </Text>
-                              )}
-                            </div>
-                          ))}
-                        </Flex>
-                      ) : (
-                        <Text kind="body/regular/xs" className="text-subtle mt-3">
-                          No runtime model calls observed yet for this worker.
-                        </Text>
-                      )}
-                    </div>
-                  ))}
-                </Flex>
-              ) : (
-                <Text kind="body/regular/sm" className="text-subtle">
-                  No worker model configuration detected for the current workflow.
-                </Text>
-              )}
             </Flex>
-          )}
+          ) : (
+            <>
+              {currentConfigCard && (
+                <CurrentConfigCard
+                  title={currentConfigCard.title}
+                  models={liveModels}
+                  statusLabel={currentConfigCard.statusLabel}
+                  tone={currentConfigCard.tone}
+                  pathLabel={currentConfigCard.pathLabel}
+                  pathValue={currentConfigCard.pathValue}
+                />
+              )}
 
-          {providerStatus?.generated_at && (
-            <Text kind="body/regular/xs" className="text-subtle">
-              Last checked at {formatTime(providerStatus.generated_at)}.
-            </Text>
-          )}
-        </Flex>
+              <div className="border-base border-t" />
+
+              <Flex direction="col" gap="3">
+                <Text kind="label/semibold/xs" className="text-subtle uppercase tracking-[0.08em]">
+                  Choose Research Configuration
+                </Text>
+
+                {presetOptions.length > 0 ? (
+                  <div>
+                    {presetOptions.map((preset) => {
+                      const meta = getConfigDisplayMeta({
+                        configPath: preset.config_path,
+                        name: preset.name,
+                        description: preset.description,
+                      })
+                      const isActive = preset.config_path === activePresetPath
+                      const isSelected = preset.config_path === selectedPresetPath
+
+                      return (
+                        <ConfigOptionCard
+                          key={preset.config_path}
+                          title={meta.title}
+                          description={meta.summary}
+                          kindLabel={getConfigKindLabel(preset)}
+                          configPath={preset.config_path}
+                          recommended={preset.recommended}
+                          active={isActive}
+                          selected={isSelected}
+                          expanded={isSelected}
+                          onSelect={() => setSelectedPresetPath(preset.config_path)}
+                        />
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <Text kind="body/regular/xs" className="text-subtle">
+                    No web-enabled configurations were detected for this backend.
+                  </Text>
+                )}
+
+                {canApplyPresets ? (
+                  <Button
+                    kind="secondary"
+                    size="small"
+                    onClick={() => void handlePresetApply()}
+                    disabled={
+                      presetApplying ||
+                      !selectedPresetPath ||
+                      reloadPending ||
+                      selectedPresetPath === activePresetPath
+                    }
+                    aria-label="Apply selected configuration"
+                  >
+                    {reloadPending
+                      ? 'Reloading Backend...'
+                      : selectedPresetPath === activePresetPath
+                        ? 'Already Running'
+                        : 'Apply & Reload Backend'}
+                  </Button>
+                ) : (
+                  <Text kind="body/regular/xs" className="text-subtle leading-5">
+                    In-UI switching is available only when AI-Q is running via `./scripts/start_local_stack.sh`. For an arbitrary file path outside `/configs`, start the stack with `--config_file`.
+                  </Text>
+                )}
+              </Flex>
+            </>
+          )
+        ) : optionsLoading ? (
+          <Text kind="body/regular/xs" className="text-subtle">
+            Loading runtime knowledge options...
+          </Text>
+        ) : optionsError ? (
+          <Text kind="body/regular/xs" className="text-error">
+            {optionsError}
+          </Text>
+        ) : !researchOptions ? (
+          <Text kind="body/regular/xs" className="text-subtle">
+            Local research options are unavailable for the current runtime.
+          </Text>
+        ) : (
+          <Flex direction="col" gap="4">
+            <div>
+              <Text kind="label/semibold/xs" className="text-subtle uppercase tracking-[0.08em]">
+                Knowledge Retrieval Options
+              </Text>
+              <Text kind="body/regular/xs" className="mt-1 block text-subtle leading-5">
+                These settings write a generated runtime config and reload the local backend so new research runs pick them up.
+              </Text>
+            </div>
+
+            {researchOptions.config_path && (
+              <CodeDetailBlock
+                label={formatConfigPathLabel(researchOptions.config_path) ?? 'Config Source'}
+                value={researchOptions.config_path}
+              />
+            )}
+
+            {!researchOptions.supported ? (
+              <Flex direction="col" gap="2">
+                {researchOptions.notes.map((note) => (
+                  <Text key={note} kind="body/regular/xs" className="text-subtle leading-5">
+                    {note}
+                  </Text>
+                ))}
+              </Flex>
+            ) : (
+              <>
+                <ConfigOptionRow
+                  title="Knowledge Layer"
+                  description="Enable or disable uploaded-document retrieval as a research tool."
+                  control={
+                    <Switch
+                      size="small"
+                      checked={draftOptions.knowledgeLayerEnabled}
+                      disabled={!researchOptions.can_edit || optionsApplying || reloadPending}
+                      onCheckedChange={(checked) =>
+                        setDraftOptions((current) => ({
+                          ...current,
+                          knowledgeLayerEnabled: checked,
+                        }))
+                      }
+                      attributes={{
+                        SwitchTrack: {
+                          'aria-label': 'Toggle knowledge layer',
+                          'aria-labelledby': undefined,
+                        },
+                      }}
+                    />
+                  }
+                />
+
+                <ConfigOptionRow
+                  title="Generate Summary"
+                  description="Store file-level summaries so the planner sees uploaded documents before retrieval starts."
+                  control={
+                    <Switch
+                      size="small"
+                      checked={draftOptions.generateSummary}
+                      disabled={!researchOptions.can_edit || optionsApplying || reloadPending}
+                      onCheckedChange={(checked) =>
+                        setDraftOptions((current) => ({
+                          ...current,
+                          generateSummary: checked,
+                        }))
+                      }
+                      attributes={{
+                        SwitchTrack: {
+                          'aria-label': 'Toggle generate summary',
+                          'aria-labelledby': undefined,
+                        },
+                      }}
+                    />
+                  }
+                />
+
+                <ConfigOptionRow
+                  title="Top K"
+                  description="Control how many retrieved chunks are returned to the agent for each knowledge search."
+                  control={
+                    <TextInput
+                      value={draftOptions.topK}
+                      onValueChange={(value) =>
+                        setDraftOptions((current) => ({
+                          ...current,
+                          topK: value,
+                        }))
+                      }
+                      type="number"
+                      size="small"
+                      className="w-24"
+                      placeholder="5"
+                      disabled={!researchOptions.can_edit || optionsApplying || reloadPending}
+                      attributes={{
+                        TextInputValue: {
+                          min: 1,
+                          max: 50,
+                          step: 1,
+                          inputMode: 'numeric',
+                          'aria-label': 'Top K retrieval count',
+                        },
+                      }}
+                    />
+                  }
+                />
+
+                {!topKIsValid && (
+                  <Text kind="body/regular/xs" className="text-error">
+                    Top K must be a whole number between 1 and 50.
+                  </Text>
+                )}
+
+                <Banner kind="inline" status="info" className="px-3 py-2">
+                  {researchOptions.notes.join(' ')}
+                </Banner>
+
+                {researchOptions.can_edit ? (
+                  <Button
+                    kind="secondary"
+                    size="small"
+                    onClick={() => void handleOptionsApply()}
+                    disabled={optionsApplying || reloadPending || !topKIsValid || !optionsDirty}
+                    aria-label="Save research options"
+                  >
+                    {reloadPending ? 'Reloading Backend...' : 'Save Options & Reload Backend'}
+                  </Button>
+                ) : (
+                  <Text kind="body/regular/xs" className="text-subtle leading-5">
+                    In-UI option editing is available only when AI-Q is running via `./scripts/start_local_stack.sh`.
+                  </Text>
+                )}
+              </>
+            )}
+          </Flex>
+        )}
       </Flex>
     </SidePanel>
   )

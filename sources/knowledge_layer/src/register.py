@@ -281,7 +281,21 @@ async def knowledge_retrieval(config: KnowledgeRetrievalConfig, _builder: Builde
         try:
             ctx = Context.get()
             session_collection = ctx.conversation_id if ctx else None
-            target_collection = session_collection or collection
+            target_collection = collection
+            if session_collection:
+                try:
+                    from aiq_api.app_state import get_app_state_store
+
+                    target_collection = (
+                        await get_app_state_store().get_effective_collection_name(session_collection)
+                    ) or session_collection
+                except Exception as exc:
+                    logger.debug(
+                        "Knowledge search falling back to legacy collection for %s: %s",
+                        session_collection,
+                        exc,
+                    )
+                    target_collection = session_collection
         except Exception:
             target_collection = collection
 

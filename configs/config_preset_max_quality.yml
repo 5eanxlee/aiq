@@ -1,12 +1,12 @@
 # Preset: maximum quality / unconstrained latency and cost
 # Intended use:
 # - Highest-quality configuration that still fits the current AI-Q architecture
-# - GPT-5.4 pro handles clarification, planning, and orchestration through the Responses API
+# - GPT-5.4 handles clarification, planning, and orchestration through the Responses API
 # - Nemotron Super handles the research-worker passes
 # - Tavily + Serper mirror the stronger public benchmark search stack
 # Notes:
 # - This preset prioritizes answer quality over latency and cost.
-# - GPT-5.4 pro is Responses-only and can take minutes on harder requests.
+# - GPT-5.4 runs with xhigh reasoning effort for deeper planning/orchestration.
 
 general:
   use_uvloop: true
@@ -46,9 +46,9 @@ llms:
     chat_template_kwargs:
       enable_thinking: true
 
-  nemotron_super_llm:
+  nemotron_ultra_llm:
     _type: nim
-    model_name: nvidia/nemotron-3-super-120b-a12b
+    model_name: nvidia/llama-3.1-nemotron-ultra-253b-v1
     base_url: "https://integrate.api.nvidia.com/v1"
     temperature: 0.3
     top_p: 0.9
@@ -57,9 +57,9 @@ llms:
     chat_template_kwargs:
       enable_thinking: true
 
-  openai_gpt_5_4_pro:
+  openai_gpt_5_4:
     _type: openai
-    model_name: "gpt-5.4-pro"
+    model_name: "gpt-5.4"
     api_key: ${OPENAI_API_KEY}
     api_type: responses
     reasoning_effort: xhigh
@@ -109,8 +109,8 @@ functions:
 
   clarifier_agent:
     _type: clarifier_agent
-    llm: openai_gpt_5_4_pro
-    planner_llm: openai_gpt_5_4_pro
+    llm: openai_gpt_5_4
+    planner_llm: openai_gpt_5_4
     tools:
       - web_search_tool
       - knowledge_search
@@ -121,7 +121,7 @@ functions:
 
   shallow_research_agent:
     _type: shallow_research_agent
-    llm: nemotron_super_llm
+    llm: nemotron_ultra_llm
     verbose: true
     tools:
       - web_search_tool
@@ -131,9 +131,9 @@ functions:
 
   deep_research_agent:
     _type: deep_research_agent
-    orchestrator_llm: openai_gpt_5_4_pro
-    researcher_llm: nemotron_super_llm
-    planner_llm: openai_gpt_5_4_pro
+    orchestrator_llm: openai_gpt_5_4
+    researcher_llm: nemotron_ultra_llm
+    planner_llm: openai_gpt_5_4
     max_loops: 2
     verbose: true
     tools:

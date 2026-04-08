@@ -5,4 +5,5 @@
  * Documents Components Exports
  */
 
+export { ActiveCollectionSync } from './ActiveCollectionSync'
 export { FileUploadZone } from './FileUploadZone'

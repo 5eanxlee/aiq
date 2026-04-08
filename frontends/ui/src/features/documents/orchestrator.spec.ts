@@ -162,6 +162,23 @@ describe('UploadOrchestrator', () => {
       expect(mockClient.getCollection).not.toHaveBeenCalled()
     })
 
+    test('loads files for project collections even without a known collection marker', async () => {
+      mockSessionHasKnownCollection.mockReturnValue(false)
+      mockClient.getCollection.mockResolvedValue({
+        name: 'project_workspace_1',
+        description: 'Project memory',
+      })
+      mockClient.listFiles.mockResolvedValue([
+        { file_id: 'report.md', file_name: 'report.md', status: 'success' },
+      ])
+
+      await UploadOrchestrator.handleSessionChange('project_workspace_1')
+      await vi.runAllTimersAsync()
+
+      expect(mockClient.getCollection).toHaveBeenCalledWith('project_workspace_1')
+      expect(mockClient.listFiles).toHaveBeenCalledWith('project_workspace_1')
+    })
+
     test('handles undefined session', async () => {
       await UploadOrchestrator.handleSessionChange('session-1')
       await UploadOrchestrator.handleSessionChange(undefined)

@@ -12,7 +12,7 @@ describe('useLayoutStore', () => {
       rightPanel: null,
       researchPanelTab: 'plan',
       dataSourcesPanelTab: 'connections',
-      theme: 'system',
+      theme: 'light',
     })
   })
 
@@ -24,6 +24,7 @@ describe('useLayoutStore', () => {
       expect(state.rightPanel).toBeNull()
       expect(state.researchPanelTab).toBe('plan')
       expect(state.dataSourcesPanelTab).toBe('connections')
+      expect(state.theme).toBe('light')
     })
   })
 
@@ -89,6 +90,12 @@ describe('useLayoutStore', () => {
       useLayoutStore.getState().openRightPanel('settings')
 
       expect(useLayoutStore.getState().rightPanel).toBe('settings')
+    })
+
+    test('opens providers panel', () => {
+      useLayoutStore.getState().openRightPanel('providers')
+
+      expect(useLayoutStore.getState().rightPanel).toBe('providers')
     })
 
     test('replaces existing panel', () => {

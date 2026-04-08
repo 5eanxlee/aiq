@@ -78,7 +78,7 @@ Starts the NAT FastAPI server for deep research with async job support.
 | `http://localhost:8000/v1/jobs/async/submit` | Submit async job (POST) |
 | `http://localhost:8000/v1/jobs/async/job/{id}/stream` | SSE stream for job progress |
 
-### `start_local_stack.sh` / `stop_local_stack.sh` / `restart_local_stack.sh` - Fast Local Loop
+### `start_local_stack.sh` / `stop_local_stack.sh` / `restart_local_stack.sh` / `restart_local_backend.sh` - Fast Local Loop
 
 Starts or stops the local backend + frontend dev stack in the background with pid files and logs.
 This is the quickest way to run, kill, and redeploy during UI/backend iteration.
@@ -87,6 +87,7 @@ This is the quickest way to run, kill, and redeploy during UI/backend iteration.
 ./scripts/start_local_stack.sh
 ./scripts/stop_local_stack.sh
 ./scripts/restart_local_stack.sh
+./scripts/restart_local_backend.sh
 ```
 
 **Recommended loop:**
@@ -94,6 +95,7 @@ This is the quickest way to run, kill, and redeploy during UI/backend iteration.
 ```bash
 ./scripts/start_local_stack.sh
 ./scripts/restart_local_stack.sh    # after backend/proxy/config updates
+./scripts/restart_local_backend.sh  # after model/config changes when frontend can stay up
 ./scripts/stop_local_stack.sh --hard
 ```
 
@@ -116,6 +118,28 @@ This is the quickest way to run, kill, and redeploy during UI/backend iteration.
 | `--next_port <port>` | Internal Next.js port (default: 3201) |
 
 `stop_local_stack.sh --hard` is the reliable cleanup command. It stops the background stack, kills stale AI-Q dev processes from this repo, and brings down the AI-Q Docker Compose stack if it is running.
+
+`restart_local_backend.sh` reloads only the backend process on the current port. It is what the frontend config switcher uses when the app was started via `./scripts/start_local_stack.sh`.
+
+### `start_max_quality_stack.sh` - One-Command Max Config
+
+Restarts the local stack into the max-quality preset:
+
+```bash
+./scripts/start_max_quality_stack.sh
+```
+
+It is equivalent to:
+
+```bash
+./scripts/restart_local_stack.sh --config_file configs/config_preset_max_quality.yml
+```
+
+You can still pass normal local-stack overrides such as:
+
+```bash
+./scripts/start_max_quality_stack.sh --backend_port 8001 --frontend_port 3005 --next_port 3201
+```
 
 ### `start_visibility_stack.sh` - High-Visibility Mode
 

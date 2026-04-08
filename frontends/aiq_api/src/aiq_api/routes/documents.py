@@ -15,6 +15,7 @@
 
 """Document management endpoints."""
 
+from datetime import datetime
 import logging
 import os
 import tempfile
@@ -25,16 +26,40 @@ from fastapi import Depends
 from fastapi import File
 from fastapi import HTTPException
 from fastapi import UploadFile
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+from pydantic import Field
 
+from aiq_agent.knowledge import get_available_documents_async
 from aiq_agent.knowledge.base import BaseIngestor
 from aiq_agent.knowledge.schema import FileInfo
 from aiq_agent.knowledge.schema import IngestionJobStatus
 
 from ..models.requests import DeleteFilesRequest
 from ..models.requests import UploadResponse
+from ..document_storage import delete_stored_documents
+from ..document_storage import discard_staged_documents
+from ..document_storage import finalize_staged_document
+from ..document_storage import get_stored_document
+from ..document_storage import stage_uploaded_document
 from .collections import _require_ingestor
 
 logger = logging.getLogger(__name__)
+
+
+class DocumentPreviewResponse(BaseModel):
+    """Preview metadata for an uploaded document."""
+
+    file_id: str
+    file_name: str
+    collection_name: str
+    status: str
+    file_size: int | None = None
+    chunk_count: int = 0
+    uploaded_at: datetime | None = None
+    ingested_at: datetime | None = None
+    summary: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 def add_document_routes(router: APIRouter):
@@ -65,8 +90,9 @@ def add_document_routes(router: APIRouter):
         if collection is None:
             raise HTTPException(status_code=404, detail=f"Collection '{collection_name}' not found")
 
-        temp_paths = []
-        original_filenames = []
+        temp_paths: list[str] = []
+        original_filenames: list[str] = []
+        staged_uploads: list[str] = []
         try:
             # Save uploaded files to temp location
             # NOTE: Files are NOT deleted here - the ingestion job cleans them up
@@ -80,6 +106,14 @@ def add_document_routes(router: APIRouter):
                     tmp.write(content)
                     temp_paths.append(tmp.name)
                     logger.debug(f"Saved uploaded file to {tmp.name}")
+                staged_uploads.append(
+                    stage_uploaded_document(
+                        collection_name=collection_name,
+                        source_path=tmp.name,
+                        original_filename=original_filename,
+                        content_type=file.content_type,
+                    )
+                )
 
             # Submit ingestion job (job will clean up temp files after processing)
             # Pass original filenames so file_details uses correct names
@@ -96,6 +130,28 @@ def add_document_routes(router: APIRouter):
             job_status = ingestor.get_job_status(job_id)
             file_ids = [fd.file_id for fd in job_status.file_details]
 
+            if len(staged_uploads) != len(file_ids):
+                logger.warning(
+                    "Staged upload count did not match returned file_ids for %s (staged=%s, file_ids=%s)",
+                    collection_name,
+                    len(staged_uploads),
+                    len(file_ids),
+                )
+                if len(staged_uploads) > len(file_ids):
+                    discard_staged_documents(collection_name, staged_uploads[len(file_ids):])
+
+            for staged_upload, file_id in zip(staged_uploads, file_ids):
+                try:
+                    finalize_staged_document(collection_name, staged_upload, file_id)
+                except Exception as storage_error:
+                    discard_staged_documents(collection_name, [staged_upload])
+                    logger.warning(
+                        "Failed to persist original upload for %s/%s: %s",
+                        collection_name,
+                        file_id,
+                        storage_error,
+                    )
+
             logger.info(f"Submitted ingestion job {job_id} for {len(files)} file(s)")
 
             return UploadResponse(
@@ -111,6 +167,8 @@ def add_document_routes(router: APIRouter):
                     os.unlink(path)
                 except OSError:
                     pass
+            if staged_uploads:
+                discard_staged_documents(collection_name, staged_uploads)
             raise
         except Exception as e:
             # Clean up on other errors (job not submitted)
@@ -119,6 +177,8 @@ def add_document_routes(router: APIRouter):
                     os.unlink(path)
                 except OSError:
                     pass
+            if staged_uploads:
+                discard_staged_documents(collection_name, staged_uploads)
             logger.error(f"Failed to upload documents: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
@@ -142,6 +202,103 @@ def add_document_routes(router: APIRouter):
             return ingestor.list_files(collection_name)
         except Exception as e:
             logger.error(f"Failed to list documents: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @router.get(
+        "/v1/collections/{collection_name}/documents/{file_id}/preview",
+        response_model=DocumentPreviewResponse,
+        tags=["documents"],
+        summary="Get document preview metadata",
+    )
+    async def get_document_preview(
+        collection_name: str,
+        file_id: str,
+        ingestor: BaseIngestor = Depends(_require_ingestor),
+    ) -> DocumentPreviewResponse:
+        """Return a lightweight preview for a document in a collection."""
+        collection = ingestor.get_collection(collection_name)
+        if collection is None:
+            raise HTTPException(status_code=404, detail=f"Collection '{collection_name}' not found")
+
+        try:
+            file_info = ingestor.get_file_status(file_id, collection_name)
+            if file_info is None:
+                files = ingestor.list_files(collection_name)
+                file_info = next(
+                    (item for item in files if item.file_id == file_id or item.file_name == file_id),
+                    None,
+                )
+
+            if file_info is None:
+                raise HTTPException(status_code=404, detail=f"Document '{file_id}' not found")
+
+            summary = None
+            metadata = dict(file_info.metadata or {})
+            if isinstance(metadata.get("summary"), str):
+                summary = metadata["summary"]
+            else:
+                for document in await get_available_documents_async(collection_name):
+                    if document.file_name == file_info.file_name:
+                        summary = document.summary
+                        break
+                if summary:
+                    metadata["summary"] = summary
+
+            status = file_info.status.value if hasattr(file_info.status, "value") else str(file_info.status)
+            return DocumentPreviewResponse(
+                file_id=file_info.file_id or file_info.file_name,
+                file_name=file_info.file_name,
+                collection_name=file_info.collection_name,
+                status=status,
+                file_size=file_info.file_size,
+                chunk_count=file_info.chunk_count,
+                uploaded_at=file_info.uploaded_at,
+                ingested_at=file_info.ingested_at,
+                summary=summary,
+                metadata=metadata,
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to get document preview for {collection_name}/{file_id}: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @router.get(
+        "/v1/collections/{collection_name}/documents/{file_id}/download",
+        tags=["documents"],
+        summary="Download the original uploaded document",
+    )
+    async def download_document(
+        collection_name: str,
+        file_id: str,
+        ingestor: BaseIngestor = Depends(_require_ingestor),
+    ) -> FileResponse:
+        """Download the original uploaded document for a collection."""
+        collection = ingestor.get_collection(collection_name)
+        if collection is None:
+            raise HTTPException(status_code=404, detail=f"Collection '{collection_name}' not found")
+
+        try:
+            stored_document = get_stored_document(collection_name, file_id)
+            if stored_document is None:
+                file_info = ingestor.get_file_status(file_id, collection_name)
+                if file_info is not None:
+                    stored_document = get_stored_document(collection_name, file_info.file_name)
+                if stored_document is None:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Original uploaded file is not available for download",
+                    )
+
+            return FileResponse(
+                path=stored_document.content_path,
+                media_type=stored_document.content_type or "application/octet-stream",
+                filename=stored_document.original_filename,
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to download document for {collection_name}/{file_id}: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
     @router.delete(
@@ -172,6 +329,10 @@ def add_document_routes(router: APIRouter):
             result = ingestor.delete_files(request.file_ids, collection_name)
             total_deleted = result.get("total_deleted", 0)
             failed = result.get("failed", [])
+            successful_ids = result.get("successful", [])
+
+            if successful_ids:
+                delete_stored_documents(collection_name, successful_ids)
 
             if failed:
                 result["message"] = "Some files could not be deleted"

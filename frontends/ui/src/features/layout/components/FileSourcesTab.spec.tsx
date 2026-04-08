@@ -1,20 +1,98 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { render, screen } from '@/test-utils'
+import { fireEvent, render, screen } from '@/test-utils'
 import userEvent from '@testing-library/user-event'
-import { vi, describe, test, expect, beforeEach } from 'vitest'
+import { vi, describe, test, expect, beforeEach, afterEach } from 'vitest'
 import { FileSourcesTab } from './FileSourcesTab'
 
+const PROJECT_COLLECTION = 'project_workspace_1'
+const PROJECT_ID = 'project-1'
+const originalCreateObjectURL = URL.createObjectURL
+const originalRevokeObjectURL = URL.revokeObjectURL
+const mockGetCachedUploadedFile = vi.fn()
+const mockCacheResolvedFile = vi.fn()
+const mockEnsureSession = vi.fn(() => 'session-1')
+const mockCurrentConversation: {
+  id: string
+  projectId?: string
+  knowledgeCollectionName?: string
+} = {
+  id: 'session-1',
+  projectId: PROJECT_ID,
+  knowledgeCollectionName: PROJECT_COLLECTION,
+}
+const mockProjectsState: {
+  currentProjectId: string | null
+  projects: Array<{
+    id: string
+    title: string
+    knowledgeCollectionName: string
+  }>
+  getCurrentProject: () => {
+    id: string
+    title: string
+    knowledgeCollectionName: string
+  } | undefined
+} = {
+  currentProjectId: PROJECT_ID,
+  projects: [
+    {
+      id: PROJECT_ID,
+      title: 'Alpha Project',
+      knowledgeCollectionName: PROJECT_COLLECTION,
+    },
+  ],
+  getCurrentProject: () =>
+    mockProjectsState.currentProjectId
+      ? mockProjectsState.projects.find((project) => project.id === mockProjectsState.currentProjectId)
+      : undefined,
+}
+
 // Mock the chat store
-vi.mock('@/features/chat/store', () => ({
-  useChatStore: vi.fn((selector) => {
-    const state = {
-      currentConversation: { id: 'session-1' },
-      ensureSession: vi.fn(() => 'session-1'),
+vi.mock('@/features/chat/store', () => {
+  const useChatStore = Object.assign(
+    vi.fn((selector) =>
+      selector({
+        currentConversation: mockCurrentConversation,
+        ensureSession: mockEnsureSession,
+      })
+    ),
+    {
+      getState: () => ({
+        currentConversation: mockCurrentConversation,
+        ensureSession: mockEnsureSession,
+      }),
     }
-    return selector(state)
+  )
+  return { useChatStore }
+})
+
+vi.mock('@/features/projects', () => {
+  const useProjectsStore = Object.assign(vi.fn((selector) => selector(mockProjectsState)), {
+    getState: () => mockProjectsState,
+  })
+  return { useProjectsStore }
+})
+
+vi.mock('@/adapters/auth', () => ({
+  useAuth: () => ({
+    idToken: 'test-token',
   }),
+}))
+
+const mockGetFilePreview = vi.fn()
+const mockDownloadFile = vi.fn()
+vi.mock('@/adapters/api', () => ({
+  createDocumentsClient: vi.fn(() => ({
+    getFilePreview: mockGetFilePreview,
+    downloadFile: mockDownloadFile,
+  })),
+}))
+
+vi.mock('@/features/documents/file-cache', () => ({
+  getCachedUploadedFile: (...args: unknown[]) => mockGetCachedUploadedFile(...args),
+  cacheResolvedFile: (...args: unknown[]) => mockCacheResolvedFile(...args),
 }))
 
 // Mock useAppConfig
@@ -49,7 +127,11 @@ vi.mock('@/features/documents', () => ({
     clearError: mockClearError,
   })),
   useDocumentsStore: vi.fn((selector) => {
-    const state = { currentCollectionName: 'session-1' }
+    const state = {
+      currentCollectionName: PROJECT_COLLECTION,
+      isLoadingFiles: false,
+      loadedSessionId: PROJECT_COLLECTION,
+    }
     return selector(state)
   }),
   FileUploadZone: ({ onUpload }: { onUpload: (files: File[]) => void }) => (
@@ -73,14 +155,17 @@ vi.mock('./FileSourceCard', () => ({
   FileSourceCard: ({
     title,
     onDelete,
+    onView,
     id,
   }: {
     title: string
     onDelete: (id: string) => void
+    onView?: () => void
     id: string
   }) => (
     <div data-testid={`file-card-${id}`}>
       {title}
+      <button onClick={onView}>View</button>
       <button onClick={() => onDelete(id)}>Delete</button>
     </div>
   ),
@@ -104,20 +189,108 @@ vi.mock('./DeleteFileConfirmationModal', () => ({
     ) : null,
 }))
 
+vi.mock('./FilePreviewModal', () => ({
+  FilePreviewModal: ({
+    open,
+    preview,
+    error,
+    isLoading,
+    downloadError,
+    onDownload,
+    isDownloading,
+  }: {
+    open: boolean
+    preview: { file_name?: string } | null
+    error?: string | null
+    isLoading?: boolean
+    downloadError?: string | null
+    onDownload?: () => void
+    isDownloading?: boolean
+  }) =>
+    open ? (
+      <div data-testid="file-preview-modal">
+        {isLoading ? 'Loading preview' : error ? error : preview?.file_name}
+        {downloadError ? <div>{downloadError}</div> : null}
+        <button onClick={onDownload}>{isDownloading ? 'Preparing...' : 'Download'}</button>
+      </div>
+    ) : null,
+}))
+
 import { useFileUpload, useDocumentsStore } from '@/features/documents'
 
 describe('FileSourcesTab', () => {
+  afterEach(() => {
+    global.URL.createObjectURL = originalCreateObjectURL
+    global.URL.revokeObjectURL = originalRevokeObjectURL
+    vi.restoreAllMocks()
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
+    mockCurrentConversation.id = 'session-1'
+    mockCurrentConversation.projectId = PROJECT_ID
+    mockCurrentConversation.knowledgeCollectionName = PROJECT_COLLECTION
+    mockEnsureSession.mockReturnValue('session-1')
+    mockProjectsState.currentProjectId = PROJECT_ID
+    mockProjectsState.projects = [
+      {
+        id: PROJECT_ID,
+        title: 'Alpha Project',
+        knowledgeCollectionName: PROJECT_COLLECTION,
+      },
+    ]
+    mockGetCachedUploadedFile.mockResolvedValue(null)
+    mockCacheResolvedFile.mockResolvedValue(undefined)
+    mockDownloadFile.mockResolvedValue({
+      blob: new Blob(['pdf-data'], { type: 'application/pdf' }),
+      fileName: 'document.pdf',
+      contentType: 'application/pdf',
+    })
+    vi.mocked(useDocumentsStore).mockImplementation((selector) => {
+      const state = {
+        currentCollectionName: PROJECT_COLLECTION,
+        isLoadingFiles: false,
+        loadedSessionId: PROJECT_COLLECTION,
+      }
+      return (selector as (s: typeof state) => unknown)(state)
+    })
+    vi.mocked(useFileUpload).mockReturnValue({
+      uploadFiles: mockUploadFiles,
+      deleteFile: mockDeleteFile,
+      sessionFiles: [],
+      isUploading: false,
+      isPolling: false,
+      error: null,
+      clearError: mockClearError,
+    } as unknown as ReturnType<typeof useFileUpload>)
+    mockGetFilePreview.mockResolvedValue({
+      file_id: 'document.pdf',
+      file_name: 'document.pdf',
+      collection_name: PROJECT_COLLECTION,
+      status: 'success',
+      chunk_count: 2,
+      metadata: {},
+    })
+    global.URL.createObjectURL = vi.fn(() => 'blob:preview')
+    global.URL.revokeObjectURL = vi.fn()
   })
 
   test('renders empty state when no files', () => {
     render(<FileSourcesTab />)
 
-    expect(screen.getByText('No Attached Files')).toBeInTheDocument()
-    expect(
-      screen.getByText('All attached files will be accessible to agents in this session unless removed.')
-    ).toBeInTheDocument()
+    expect(screen.getByText('No Project Files')).toBeInTheDocument()
+    expect(screen.getByText(/files uploaded to "Alpha Project" will be shared across sessions/i)).toBeInTheDocument()
+  })
+
+  test('renders standalone empty state when no project is selected', () => {
+    mockCurrentConversation.projectId = undefined
+    mockCurrentConversation.knowledgeCollectionName = 'session-standalone'
+    mockProjectsState.currentProjectId = null
+
+    render(<FileSourcesTab />)
+
+    expect(screen.getByText('No Chat Files')).toBeInTheDocument()
+    expect(screen.getByText(/files uploaded to this standalone chat stay available only in this chat/i)).toBeInTheDocument()
   })
 
   test('renders file upload zone in empty state', () => {
@@ -126,15 +299,30 @@ describe('FileSourcesTab', () => {
     expect(screen.getByText('Upload Zone')).toBeInTheDocument()
   })
 
+  test('uploads into the project collection when the session has no explicit collection', async () => {
+    mockCurrentConversation.knowledgeCollectionName = undefined
+
+    render(<FileSourcesTab />)
+
+    fireEvent.click(screen.getByText('Upload Zone'))
+
+    expect(mockEnsureSession).toHaveBeenCalled()
+    expect(mockUploadFiles).toHaveBeenCalledWith(
+      [expect.objectContaining({ name: 'test.pdf' })],
+      PROJECT_COLLECTION
+    )
+  })
+
   test('renders file list when files exist', () => {
     vi.mocked(useFileUpload).mockReturnValue({
       uploadFiles: mockUploadFiles,
       deleteFile: mockDeleteFile,
       sessionFiles: [
-        { id: 'file-1', fileName: 'document.pdf', status: 'success', collectionName: 'session-1' },
-        { id: 'file-2', fileName: 'report.txt', status: 'uploading', collectionName: 'session-1' },
+        { id: 'file-1', fileName: 'document.pdf', status: 'success', collectionName: PROJECT_COLLECTION },
+        { id: 'file-2', fileName: 'report.txt', status: 'uploading', collectionName: PROJECT_COLLECTION },
       ],
       isUploading: false,
+      isPolling: false,
       error: null,
       clearError: mockClearError,
     } as unknown as ReturnType<typeof useFileUpload>)
@@ -150,16 +338,40 @@ describe('FileSourcesTab', () => {
       uploadFiles: mockUploadFiles,
       deleteFile: mockDeleteFile,
       sessionFiles: [
-        { id: 'file-1', fileName: 'doc.pdf', status: 'success', collectionName: 'session-1' },
+        { id: 'file-1', fileName: 'doc.pdf', status: 'success', collectionName: PROJECT_COLLECTION },
       ],
       isUploading: false,
+      isPolling: false,
       error: null,
       clearError: mockClearError,
     } as unknown as ReturnType<typeof useFileUpload>)
 
     render(<FileSourcesTab />)
 
-    expect(screen.getByText(/uploaded files \(1\)/i)).toBeInTheDocument()
+    expect(screen.getByText(/project files \(1\)/i)).toBeInTheDocument()
+  })
+
+  test('shows chat file scope when viewing standalone files', () => {
+    mockCurrentConversation.projectId = undefined
+    mockCurrentConversation.knowledgeCollectionName = 'session-standalone'
+    mockProjectsState.currentProjectId = null
+
+    vi.mocked(useFileUpload).mockReturnValue({
+      uploadFiles: mockUploadFiles,
+      deleteFile: mockDeleteFile,
+      sessionFiles: [
+        { id: 'file-1', fileName: 'doc.pdf', status: 'success', collectionName: 'session-standalone' },
+      ],
+      isUploading: false,
+      isPolling: false,
+      error: null,
+      clearError: mockClearError,
+    } as unknown as ReturnType<typeof useFileUpload>)
+
+    render(<FileSourcesTab />)
+
+    expect(screen.getByText(/chat files \(1\)/i)).toBeInTheDocument()
+    expect(screen.getByText(/used only in this standalone chat/i)).toBeInTheDocument()
   })
 
   test('opens delete confirmation modal when delete is clicked', async () => {
@@ -169,9 +381,10 @@ describe('FileSourcesTab', () => {
       uploadFiles: mockUploadFiles,
       deleteFile: mockDeleteFile,
       sessionFiles: [
-        { id: 'file-1', fileName: 'doc.pdf', status: 'success', collectionName: 'session-1' },
+        { id: 'file-1', fileName: 'doc.pdf', status: 'success', collectionName: PROJECT_COLLECTION },
       ],
       isUploading: false,
+      isPolling: false,
       error: null,
       clearError: mockClearError,
     } as unknown as ReturnType<typeof useFileUpload>)
@@ -190,9 +403,10 @@ describe('FileSourcesTab', () => {
       uploadFiles: mockUploadFiles,
       deleteFile: mockDeleteFile,
       sessionFiles: [
-        { id: 'file-1', fileName: 'doc.pdf', status: 'success', collectionName: 'session-1' },
+        { id: 'file-1', fileName: 'doc.pdf', status: 'success', collectionName: PROJECT_COLLECTION },
       ],
       isUploading: false,
+      isPolling: false,
       error: null,
       clearError: mockClearError,
     } as unknown as ReturnType<typeof useFileUpload>)
@@ -244,7 +458,7 @@ describe('FileSourcesTab', () => {
       uploadFiles: mockUploadFiles,
       deleteFile: mockDeleteFile,
       sessionFiles: [
-        { id: 'file-1', fileName: 'doc.pdf', status: 'uploading', collectionName: 'session-1' },
+        { id: 'file-1', fileName: 'doc.pdf', status: 'uploading', collectionName: PROJECT_COLLECTION },
       ],
       isUploading: true,
       isPolling: false,
@@ -261,7 +475,11 @@ describe('FileSourcesTab', () => {
   test('does not show spinner when upload belongs to a different session', () => {
     // Active collection is a different session than the one rendered
     vi.mocked(useDocumentsStore).mockImplementation((selector) => {
-      const state = { currentCollectionName: 'other-session-99' }
+      const state = {
+        currentCollectionName: 'other-session-99',
+        isLoadingFiles: false,
+        loadedSessionId: PROJECT_COLLECTION,
+      }
       return (selector as (s: typeof state) => unknown)(state)
     })
 
@@ -279,7 +497,7 @@ describe('FileSourcesTab', () => {
 
     // Spinner should NOT appear because the upload is for a different session
     expect(screen.queryByText('Checking for files...')).not.toBeInTheDocument()
-    expect(screen.getByText('No Attached Files')).toBeInTheDocument()
+    expect(screen.getByText('No Project Files')).toBeInTheDocument()
   })
 
   test('displays upload error when present', () => {
@@ -295,5 +513,170 @@ describe('FileSourcesTab', () => {
     render(<FileSourcesTab />)
 
     expect(screen.getByText('File too large')).toBeInTheDocument()
+  })
+
+  test('opens file preview when view is clicked', async () => {
+    const user = userEvent.setup()
+
+    vi.mocked(useFileUpload).mockReturnValue({
+      uploadFiles: mockUploadFiles,
+      deleteFile: mockDeleteFile,
+      sessionFiles: [
+        { id: 'file-1', fileName: 'document.pdf', status: 'success', collectionName: PROJECT_COLLECTION },
+      ],
+      isUploading: false,
+      isPolling: false,
+      error: null,
+      clearError: mockClearError,
+    } as unknown as ReturnType<typeof useFileUpload>)
+
+    render(<FileSourcesTab />)
+
+    await user.click(screen.getByRole('button', { name: /view/i }))
+
+    expect(mockGetFilePreview).toHaveBeenCalledWith(PROJECT_COLLECTION, 'document.pdf')
+    expect(screen.getByTestId('file-preview-modal')).toHaveTextContent('document.pdf')
+  })
+
+  test('falls back to local file metadata when preview endpoint is unavailable', async () => {
+    const user = userEvent.setup()
+    mockGetFilePreview.mockRejectedValueOnce(new Error('Backend returned 404: {"detail":"Not Found"}'))
+
+    vi.mocked(useFileUpload).mockReturnValue({
+      uploadFiles: mockUploadFiles,
+      deleteFile: mockDeleteFile,
+      sessionFiles: [
+        {
+          id: 'file-1',
+          fileName: 'document.pdf',
+          fileSize: 2048,
+          status: 'success',
+          collectionName: PROJECT_COLLECTION,
+          uploadedAt: '2026-04-07T20:00:00.000Z',
+        },
+      ],
+      isUploading: false,
+      isPolling: false,
+      error: null,
+      clearError: mockClearError,
+    } as unknown as ReturnType<typeof useFileUpload>)
+
+    render(<FileSourcesTab />)
+
+    await user.click(screen.getByRole('button', { name: /view/i }))
+
+    expect(screen.getByTestId('file-preview-modal')).toHaveTextContent('document.pdf')
+    expect(screen.getByTestId('file-preview-modal')).not.toHaveTextContent('Backend returned 404')
+  })
+
+  test('downloads the original file from the preview modal', async () => {
+    const user = userEvent.setup()
+
+    vi.mocked(useFileUpload).mockReturnValue({
+      uploadFiles: mockUploadFiles,
+      deleteFile: mockDeleteFile,
+      sessionFiles: [
+        {
+          id: 'file-1',
+          fileName: 'document.pdf',
+          serverFileId: 'server-file-1',
+          status: 'success',
+          collectionName: PROJECT_COLLECTION,
+        },
+      ],
+      isUploading: false,
+      isPolling: false,
+      error: null,
+      clearError: mockClearError,
+    } as unknown as ReturnType<typeof useFileUpload>)
+
+    mockGetFilePreview.mockResolvedValueOnce({
+      file_id: 'server-file-1',
+      file_name: 'document.pdf',
+      collection_name: PROJECT_COLLECTION,
+      status: 'success',
+      chunk_count: 2,
+      metadata: {},
+    })
+
+    render(<FileSourcesTab />)
+
+    const mockClick = vi.fn()
+    const mockAnchor = { href: '', download: '', rel: '', click: mockClick, remove: vi.fn() }
+    const originalCreateElement = document.createElement.bind(document)
+    vi.spyOn(document, 'createElement').mockImplementation((tagName: string) => {
+      if (tagName.toLowerCase() === 'a') {
+        return mockAnchor as unknown as HTMLAnchorElement
+      }
+      return originalCreateElement(tagName)
+    })
+    vi.spyOn(document.body, 'appendChild').mockImplementation(() => mockAnchor as unknown as Node)
+
+    await user.click(screen.getByRole('button', { name: /view/i }))
+    await user.click(screen.getByRole('button', { name: /download/i }))
+
+    expect(mockDownloadFile).toHaveBeenCalledWith(PROJECT_COLLECTION, 'server-file-1')
+    expect(URL.createObjectURL).toHaveBeenCalled()
+    expect(mockClick).toHaveBeenCalled()
+  })
+
+  test('falls back to cached uploaded file when backend download is unavailable', async () => {
+    const user = userEvent.setup()
+    const cachedFile = new File(['cached'], 'document.pdf', { type: 'application/pdf' })
+
+    vi.mocked(useFileUpload).mockReturnValue({
+      uploadFiles: mockUploadFiles,
+      deleteFile: mockDeleteFile,
+      sessionFiles: [
+        {
+          id: 'file-1',
+          fileName: 'document.pdf',
+          serverFileId: 'server-file-1',
+          status: 'success',
+          collectionName: PROJECT_COLLECTION,
+        },
+      ],
+      isUploading: false,
+      isPolling: false,
+      error: null,
+      clearError: mockClearError,
+    } as unknown as ReturnType<typeof useFileUpload>)
+
+    mockGetFilePreview.mockResolvedValueOnce({
+      file_id: 'server-file-1',
+      file_name: 'document.pdf',
+      collection_name: PROJECT_COLLECTION,
+      status: 'success',
+      chunk_count: 2,
+      metadata: {},
+    })
+    mockDownloadFile.mockRejectedValueOnce(
+      new Error('Original uploaded file is not available for download')
+    )
+    mockGetCachedUploadedFile.mockResolvedValueOnce(cachedFile)
+
+    render(<FileSourcesTab />)
+
+    const mockClick = vi.fn()
+    const mockAnchor = { href: '', download: '', rel: '', click: mockClick, remove: vi.fn() }
+    const originalCreateElement = document.createElement.bind(document)
+    vi.spyOn(document, 'createElement').mockImplementation((tagName: string) => {
+      if (tagName.toLowerCase() === 'a') {
+        return mockAnchor as unknown as HTMLAnchorElement
+      }
+      return originalCreateElement(tagName)
+    })
+    vi.spyOn(document.body, 'appendChild').mockImplementation(() => mockAnchor as unknown as Node)
+
+    await user.click(screen.getByRole('button', { name: /view/i }))
+    await user.click(screen.getByRole('button', { name: /download/i }))
+
+    expect(mockGetCachedUploadedFile).toHaveBeenCalledWith(
+      PROJECT_COLLECTION,
+      'server-file-1',
+      'document.pdf'
+    )
+    expect(mockClick).toHaveBeenCalled()
+    expect(screen.getByTestId('file-preview-modal')).not.toHaveTextContent(/re-upload it once/i)
   })
 })

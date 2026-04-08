@@ -23,7 +23,8 @@ import { AgentCard, type AgentInfo } from './AgentCard'
  * Groups tool calls under their parent agents using agent_id.
  */
 export const AgentsTab: FC = () => {
-  const { deepResearchAgents, deepResearchToolCalls } = useChatStore()
+  const deepResearchAgents = useChatStore((state) => state.deepResearchAgents)
+  const deepResearchToolCalls = useChatStore((state) => state.deepResearchToolCalls)
 
   const agentsWithToolCalls = useMemo((): AgentInfo[] => {
     return deepResearchAgents.map((agent) => {

@@ -23,6 +23,8 @@ import { type FC, useState } from 'react'
 import { Banner } from '@/adapters/ui'
 import { useLayoutStore } from '@/features/layout/store'
 import { useDocumentsStore } from '@/features/documents'
+import { useProjectsStore } from '@/features/projects'
+import { resolveKnowledgeCollectionName } from '../lib/resolve-knowledge-collection'
 import { useChatStore } from '../store'
 
 const WARNING_MESSAGE =
@@ -52,11 +54,24 @@ const DismissibleNoSourcesBanner: FC = () => {
 
 export const NoSourcesBanner: FC<NoSourcesBannerProps> = ({ isAuthenticated = false }) => {
   const enabledDataSourceIds = useLayoutStore((state) => state.enabledDataSourceIds)
-  const sessionId = useChatStore((state) => state.currentConversation?.id)
+  const currentConversation = useChatStore((state) => state.currentConversation)
+  const currentProject = useProjectsStore((state) => {
+    const targetProjectId = currentConversation
+      ? currentConversation.projectId ?? null
+      : state.currentProjectId
+    if (!targetProjectId) {
+      return null
+    }
+    return state.projects.find((project) => project.id === targetProjectId) ?? null
+  })
+  const collectionName = resolveKnowledgeCollectionName(
+    currentConversation,
+    currentProject?.knowledgeCollectionName
+  )
 
   // Get completed files for the current session from the documents store
   const hasAvailableFiles = useDocumentsStore((state) =>
-    state.trackedFiles.some((f) => f.collectionName === sessionId && f.status === 'success')
+    state.trackedFiles.some((f) => f.collectionName === collectionName && f.status === 'success')
   )
 
   const hasAnySources = enabledDataSourceIds.length > 0
@@ -64,5 +79,5 @@ export const NoSourcesBanner: FC<NoSourcesBannerProps> = ({ isAuthenticated = fa
 
   if (!isAuthenticated || !shouldShow) return null
 
-  return <DismissibleNoSourcesBanner key={sessionId ?? 'default-session'} />
+  return <DismissibleNoSourcesBanner key={collectionName ?? 'default-session'} />
 }

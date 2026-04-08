@@ -32,7 +32,10 @@ interface ReportTabProps {
  * Renders research notes with a subtle preview treatment and the final report at full prominence.
  */
 export const ReportTab: FC<ReportTabProps> = ({ children }) => {
-  const { reportContent, reportContentCategory, isStreaming, currentStatus } = useChatStore()
+  const reportContent = useChatStore((state) => state.reportContent)
+  const reportContentCategory = useChatStore((state) => state.reportContentCategory)
+  const isStreaming = useChatStore((state) => state.isStreaming)
+  const currentStatus = useChatStore((state) => state.currentStatus)
 
   const reportContentStr = typeof reportContent === 'string' ? reportContent : ''
   const isEmpty = !reportContentStr.trim()

@@ -81,37 +81,32 @@ export const useDeepResearch = (): UseDeepResearchReturn => {
   const { idToken, authRequired, error: authError } = useAuth()
 
   // Chat store state and actions
-  const {
-    deepResearchJobId,
-    isDeepResearchStreaming,
-    deepResearchStatus,
-    updateDeepResearchStatus,
-    completeDeepResearch,
-    finalizeDeepResearchRun,
-    addDeepResearchCitation,
-    setReportContent,
-    addThinkingStep,
-    appendToThinkingStep,
-    completeThinkingStep,
-    setCurrentStatus,
-    setStreaming,
-    setDeepResearchTodos,
-    stopAllDeepResearchSpinners,
-    // New dedicated actions for ThinkingTab sub-tabs
-    addDeepResearchLLMStep,
-    appendToDeepResearchLLMStep,
-    completeDeepResearchLLMStep,
-    addDeepResearchAgentWithId,
-    completeDeepResearchAgent,
-    addDeepResearchToolCall,
-    completeDeepResearchToolCall,
-    addDeepResearchFile,
-    // Actions for message patching
-    patchConversationMessage,
-    // Actions for deep research banners
-    addDeepResearchBanner,
-    setStreamLoaded,
-  } = useChatStore()
+  const deepResearchJobId = useChatStore((state) => state.deepResearchJobId)
+  const isDeepResearchStreaming = useChatStore((state) => state.isDeepResearchStreaming)
+  const deepResearchStatus = useChatStore((state) => state.deepResearchStatus)
+  const updateDeepResearchStatus = useChatStore((state) => state.updateDeepResearchStatus)
+  const completeDeepResearch = useChatStore((state) => state.completeDeepResearch)
+  const finalizeDeepResearchRun = useChatStore((state) => state.finalizeDeepResearchRun)
+  const addDeepResearchCitation = useChatStore((state) => state.addDeepResearchCitation)
+  const setReportContent = useChatStore((state) => state.setReportContent)
+  const addThinkingStep = useChatStore((state) => state.addThinkingStep)
+  const appendToThinkingStep = useChatStore((state) => state.appendToThinkingStep)
+  const completeThinkingStep = useChatStore((state) => state.completeThinkingStep)
+  const setCurrentStatus = useChatStore((state) => state.setCurrentStatus)
+  const setStreaming = useChatStore((state) => state.setStreaming)
+  const setDeepResearchTodos = useChatStore((state) => state.setDeepResearchTodos)
+  const stopAllDeepResearchSpinners = useChatStore((state) => state.stopAllDeepResearchSpinners)
+  const addDeepResearchLLMStep = useChatStore((state) => state.addDeepResearchLLMStep)
+  const appendToDeepResearchLLMStep = useChatStore((state) => state.appendToDeepResearchLLMStep)
+  const completeDeepResearchLLMStep = useChatStore((state) => state.completeDeepResearchLLMStep)
+  const addDeepResearchAgentWithId = useChatStore((state) => state.addDeepResearchAgentWithId)
+  const completeDeepResearchAgent = useChatStore((state) => state.completeDeepResearchAgent)
+  const addDeepResearchToolCall = useChatStore((state) => state.addDeepResearchToolCall)
+  const completeDeepResearchToolCall = useChatStore((state) => state.completeDeepResearchToolCall)
+  const addDeepResearchFile = useChatStore((state) => state.addDeepResearchFile)
+  const patchConversationMessage = useChatStore((state) => state.patchConversationMessage)
+  const addDeepResearchBanner = useChatStore((state) => state.addDeepResearchBanner)
+  const setStreamLoaded = useChatStore((state) => state.setStreamLoaded)
 
   const getRunTiming = useCallback(() => {
     const state = useChatStore.getState()

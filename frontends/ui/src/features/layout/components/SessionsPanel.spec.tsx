@@ -96,6 +96,13 @@ describe('SessionsPanel', () => {
     expect(screen.getByText('Sessions')).toBeInTheDocument()
   })
 
+  test('renders standalone scope row', () => {
+    render(<SessionsPanel sessions={mockSessions} />)
+
+    expect(screen.getByText('Chat Scope')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /standalone chat \(no shared project files\)/i })).toBeInTheDocument()
+  })
+
   test('renders new session button', () => {
     render(<SessionsPanel sessions={mockSessions} />)
 
@@ -118,6 +125,13 @@ describe('SessionsPanel', () => {
     expect(screen.getByRole('button', { name: /start a new session/i })).toBeInTheDocument()
   })
 
+  test('shows standalone empty state when standalone scope is selected', () => {
+    render(<SessionsPanel sessions={[]} isStandaloneScope={true} />)
+
+    expect(screen.getByText('No standalone chats yet')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /start a new chat/i })).toBeInTheDocument()
+  })
+
   test('calls onNewSession when new session button clicked', async () => {
     const user = userEvent.setup()
     const onNewSession = vi.fn()
@@ -127,6 +141,18 @@ describe('SessionsPanel', () => {
     await user.click(screen.getByText('New Session'))
 
     expect(onNewSession).toHaveBeenCalled()
+    expect(mockSetSessionsPanelOpen).toHaveBeenCalledWith(false)
+  })
+
+  test('switches standalone scope when selected', async () => {
+    const user = userEvent.setup()
+    const onSelectStandalone = vi.fn()
+
+    render(<SessionsPanel sessions={mockSessions} onSelectStandalone={onSelectStandalone} />)
+
+    await user.click(screen.getByRole('button', { name: /standalone chat \(no shared project files\)/i }))
+
+    expect(onSelectStandalone).toHaveBeenCalledOnce()
     expect(mockSetSessionsPanelOpen).toHaveBeenCalledWith(false)
   })
 
@@ -157,7 +183,7 @@ describe('SessionsPanel', () => {
     await user.hover(sessionItem)
 
     expect(screen.getByRole('button', { name: /rename session/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /delete session/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^delete session$/i })).toBeInTheDocument()
   })
 
   test('renders footer text', () => {
@@ -434,7 +460,7 @@ describe('SessionsPanel - Delete Button States', () => {
     expect(deleteButton).not.toBeDisabled()
   })
 
-  test('disables "Delete All" button when any session is busy', () => {
+  test('disables the scope delete button when any session is busy', () => {
     setupChatStoreMock({
       isSessionBusy: () => false,
       hasAnyBusySession: () => true,
@@ -444,11 +470,13 @@ describe('SessionsPanel - Delete Button States', () => {
 
     render(<SessionsPanel sessions={mockSessions} />)
 
-    const deleteAllButton = screen.getByRole('button', { name: /delete all sessions \(disabled\)/i })
+    const deleteAllButton = screen.getByRole('button', {
+      name: /delete sessions \(disabled during active operations\)/i,
+    })
     expect(deleteAllButton).toBeDisabled()
   })
 
-  test('enables "Delete All" button when no sessions are busy', () => {
+  test('enables the scope delete button when no sessions are busy', () => {
     setupChatStoreMock({
       isSessionBusy: () => false,
       hasAnyBusySession: () => false,
@@ -458,7 +486,7 @@ describe('SessionsPanel - Delete Button States', () => {
 
     render(<SessionsPanel sessions={mockSessions} />)
 
-    const deleteAllButton = screen.getByRole('button', { name: /^delete all sessions$/i })
+    const deleteAllButton = screen.getByRole('button', { name: /^delete sessions$/i })
     expect(deleteAllButton).not.toBeDisabled()
   })
 

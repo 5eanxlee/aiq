@@ -53,6 +53,7 @@ import { pruneMessageForStorage } from './lib/prune-message-for-storage'
 import { ensureStorageCapacity, checkStorageHealth } from './lib/storage-manager'
 import { useLayoutStore } from '@/features/layout/store'
 import { WEB_SEARCH_SOURCE_ID } from '@/features/layout/data-sources'
+import { useProjectsStore } from '@/features/projects'
 
 const isQuotaExceededError = (error: unknown): boolean => {
   if (!(error instanceof Error)) return false
@@ -203,18 +204,36 @@ const initialState: ChatState = {
   planMessages: [],
 }
 
+const getActiveProjectMetadata = (): {
+  projectId?: string
+  knowledgeCollectionName?: string
+} => {
+  const projectsState = useProjectsStore.getState()
+  const currentProject = projectsState.getCurrentProject()
+  return {
+    projectId: currentProject?.id ?? projectsState.currentProjectId ?? undefined,
+    knowledgeCollectionName: currentProject?.knowledgeCollectionName,
+  }
+}
+
 /**
  * Create a new conversation with default values
  * @param userId - The user ID who owns this conversation
  */
-const createNewConversation = (userId: string): Conversation => ({
-  id: `s_${uuidv4().replace(/-/g, '_')}`, // Milvus: letters, numbers, underscores only (no hyphens)
-  userId,
-  title: 'New Session',
-  messages: [],
-  createdAt: new Date(),
-  updatedAt: new Date(),
-})
+const createNewConversation = (userId: string): Conversation => {
+  const { projectId, knowledgeCollectionName } = getActiveProjectMetadata()
+  return {
+    id: `s_${uuidv4().replace(/-/g, '_')}`, // Milvus: letters, numbers, underscores only (no hyphens)
+    userId,
+    projectId,
+    title: 'New Session',
+    messages: [],
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    knowledgeCollectionName,
+    knowledgeCollectionNameOverride: null,
+  }
+}
 
 /**
  * Generate a title from the first user message
@@ -293,6 +312,7 @@ export const useChatStore = create<ChatStore>()(
 
           // Restore session state from auto-selected conversation, or clear if none
           if (newCurrentConversation) {
+            useProjectsStore.getState().setCurrentProjectId(newCurrentConversation.projectId ?? null)
             get().restoreSessionState(newCurrentConversation)
             restoreConversationDataSources(newCurrentConversation)
           } else {
@@ -505,6 +525,7 @@ export const useChatStore = create<ChatStore>()(
           const conversation = conversations.find((c) => c.id === conversationId)
 
           if (conversation && conversation.userId === currentUserId) {
+            useProjectsStore.getState().setCurrentProjectId(conversation.projectId ?? null)
             // Save lastEventId if actively streaming before clearing
             if (
               currentConversation &&
@@ -931,6 +952,69 @@ export const useChatStore = create<ChatStore>()(
             false,
             'updateConversationTitle'
           )
+        },
+
+        patchConversation: (conversationId: string, patch: Partial<Conversation>) => {
+          const { currentConversation, conversations } = get()
+
+          const updatedConversations = conversations.map((conversation) =>
+            conversation.id === conversationId
+              ? {
+                  ...conversation,
+                  ...patch,
+                }
+              : conversation
+          )
+
+          const updatedCurrentConversation =
+            currentConversation?.id === conversationId
+              ? {
+                  ...currentConversation,
+                  ...patch,
+                }
+              : currentConversation
+
+          set(
+            {
+              conversations: updatedConversations,
+              currentConversation: updatedCurrentConversation,
+            },
+            false,
+            'patchConversation'
+          )
+        },
+
+        replaceUserConversations: (
+          userId: string,
+          nextUserConversations: Conversation[],
+          currentConversationId?: string | null
+        ) => {
+          const { conversations, currentConversation } = get()
+          const otherConversations = conversations.filter((conversation) => conversation.userId !== userId)
+          const mergedConversations = [...nextUserConversations, ...otherConversations]
+
+          const preferredCurrentId =
+            currentConversationId ??
+            (currentConversation?.userId === userId ? currentConversation.id : null)
+          const nextCurrentConversation =
+            nextUserConversations.find((conversation) => conversation.id === preferredCurrentId) ??
+            nextUserConversations[0] ??
+            (currentConversation?.userId !== userId ? currentConversation : null)
+
+          set(
+            {
+              conversations: mergedConversations,
+              currentConversation: nextCurrentConversation,
+            },
+            false,
+            'replaceUserConversations'
+          )
+
+          if (nextCurrentConversation) {
+            useProjectsStore.getState().setCurrentProjectId(nextCurrentConversation.projectId ?? null)
+            get().restoreSessionState(nextCurrentConversation)
+            restoreConversationDataSources(nextCurrentConversation)
+          }
         },
 
         saveDataSourcesToConversation: (ids: string[]) => {

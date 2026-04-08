@@ -53,6 +53,23 @@ logger = logging.getLogger(__name__)
 _ensure_otel_redaction_registered()
 
 
+async def _resolve_effective_collection_name(session_id: str | None) -> str | None:
+    """Resolve the collection name for a session, falling back to legacy session-scoped storage."""
+    if not session_id:
+        return None
+
+    try:
+        from aiq_api.app_state import get_app_state_store
+
+        collection_name = await get_app_state_store().get_effective_collection_name(session_id)
+        if collection_name:
+            return collection_name
+    except Exception as exc:
+        logger.debug("Falling back to legacy collection resolution for %s: %s", session_id, exc)
+
+    return session_id
+
+
 ########################################################
 # Intent Classifier
 ########################################################
@@ -342,8 +359,8 @@ async def chat_deepresearcher_agent(config: ChatDeepResearcherConfig, builder: B
         try:
             from aiq_agent.knowledge import get_available_documents_async
 
-            # Get collection from session context (conversation_id = collection_name)
-            collection_name = Context.get().conversation_id if Context.get() else None
+            session_id = Context.get().conversation_id if Context.get() else None
+            collection_name = await _resolve_effective_collection_name(session_id)
 
             if collection_name:
                 available_documents = await get_available_documents_async(collection_name)

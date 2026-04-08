@@ -11,11 +11,22 @@ let mockDeepResearchTodos: Array<{
   content: string
   status: 'pending' | 'in_progress' | 'completed' | 'stopped'
 }> = []
+let mockDeepResearchJobId: string | null = null
+let mockCurrentStatus: string | null = null
+let mockIsDeepResearchStreaming = false
+
+const getMockState = () => ({
+  deepResearchTodos: mockDeepResearchTodos,
+  deepResearchJobId: mockDeepResearchJobId,
+  currentStatus: mockCurrentStatus,
+  isDeepResearchStreaming: mockIsDeepResearchStreaming,
+})
 
 vi.mock('@/features/chat', () => ({
-  useChatStore: () => ({
-    deepResearchTodos: mockDeepResearchTodos,
-  }),
+  useChatStore: (selector?: (state: ReturnType<typeof getMockState>) => unknown) => {
+    const state = getMockState()
+    return selector ? selector(state) : state
+  },
 }))
 
 // Mock TaskCard
@@ -29,6 +40,9 @@ describe('TasksTab', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockDeepResearchTodos = []
+    mockDeepResearchJobId = null
+    mockCurrentStatus = null
+    mockIsDeepResearchStreaming = false
   })
 
   describe('empty state', () => {

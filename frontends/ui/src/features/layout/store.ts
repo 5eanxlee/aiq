@@ -27,7 +27,7 @@ const initialState: LayoutState = {
   researchPanelTab: 'plan',
   dataSourcesPanelTab: 'connections',
   enabledDataSourceIds: [], // Start empty, populated when data sources are fetched
-  theme: 'system',
+  theme: 'light',
   availableDataSources: null,
   knowledgeLayerAvailable: false, // Default to false until API confirms availability
   dataSourcesLoading: false,

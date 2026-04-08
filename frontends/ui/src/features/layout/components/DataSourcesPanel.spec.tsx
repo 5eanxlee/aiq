@@ -13,6 +13,32 @@ const mockSetDataSourcesPanelTab = vi.fn()
 const mockToggleDataSource = vi.fn()
 const mockSetEnabledDataSources = vi.fn()
 const mockFetchDataSources = vi.fn()
+let mockCurrentConversation: {
+  id: string
+  projectId?: string
+  knowledgeCollectionName?: string
+} = {
+  id: 'session-1',
+  projectId: 'project-1',
+  knowledgeCollectionName: 'project_alpha',
+}
+let mockProjectsState: {
+  currentProjectId: string | null
+  projects: Array<{
+    id: string
+    title: string
+    knowledgeCollectionName: string
+  }>
+} = {
+  currentProjectId: 'project-1',
+  projects: [
+    {
+      id: 'project-1',
+      title: 'Alpha Project',
+      knowledgeCollectionName: 'project_alpha',
+    },
+  ],
+}
 
 const mockDataSources = [
   { id: 'web_search', name: 'Web Search', description: 'Search the web' },
@@ -45,6 +71,20 @@ vi.mock('../store', () => ({
     dataSourcesError: null,
     fetchDataSources: mockFetchDataSources,
   })),
+}))
+
+vi.mock('@/features/projects', () => ({
+  useProjectsStore: vi.fn((selector) => selector(mockProjectsState)),
+}))
+
+vi.mock('@/features/chat', () => ({
+  useChatStore: vi.fn((selector) =>
+    selector({
+      currentConversation: mockCurrentConversation,
+      saveDataSourcesToConversation: vi.fn(),
+    })
+  ),
+  useIsCurrentSessionBusy: () => false,
 }))
 
 // Mock useAuth hook
@@ -83,6 +123,21 @@ import { useAuth } from '@/adapters/auth'
 describe('DataSourcesPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockCurrentConversation = {
+      id: 'session-1',
+      projectId: 'project-1',
+      knowledgeCollectionName: 'project_alpha',
+    }
+    mockProjectsState = {
+      currentProjectId: 'project-1',
+      projects: [
+        {
+          id: 'project-1',
+          title: 'Alpha Project',
+          knowledgeCollectionName: 'project_alpha',
+        },
+      ],
+    }
     // Reset mock to default open state with authenticated user
     vi.mocked(useLayoutStore).mockReturnValue({
       rightPanel: 'data-sources',
@@ -109,6 +164,8 @@ describe('DataSourcesPanel', () => {
     render(<DataSourcesPanel />)
 
     expect(screen.getByText('Data Sources')).toBeInTheDocument()
+    expect(screen.getAllByText('Project Memory').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Alpha Project').length).toBeGreaterThan(0)
   })
 
   test('renders connections tab by default', () => {
@@ -181,7 +238,45 @@ describe('DataSourcesPanel', () => {
 
     render(<DataSourcesPanel />)
 
-    expect(screen.getByText(/attached files will be always available to agents until deleted/i)).toBeInTheDocument()
+    expect(screen.getByText(/files in project memory stay available across sessions in this project until deleted/i)).toBeInTheDocument()
+  })
+
+  test('shows standalone scope copy when no project is selected', () => {
+    mockCurrentConversation = {
+      id: 'session-standalone',
+      projectId: undefined,
+      knowledgeCollectionName: 'session-standalone',
+    }
+    mockProjectsState = {
+      currentProjectId: null,
+      projects: [
+        {
+          id: 'project-1',
+          title: 'Alpha Project',
+          knowledgeCollectionName: 'project_alpha',
+        },
+      ],
+    }
+    vi.mocked(useLayoutStore).mockReturnValue({
+      rightPanel: 'data-sources',
+      closeRightPanel: mockCloseRightPanel,
+      openRightPanel: mockOpenRightPanel,
+      dataSourcesPanelTab: 'files',
+      setDataSourcesPanelTab: mockSetDataSourcesPanelTab,
+      enabledDataSourceIds: ['web_search', 'knowledge_base'],
+      toggleDataSource: mockToggleDataSource,
+      setEnabledDataSources: mockSetEnabledDataSources,
+      availableDataSources: mockDataSources,
+      dataSourcesLoading: false,
+      dataSourcesError: null,
+      fetchDataSources: mockFetchDataSources,
+    } as unknown as ReturnType<typeof useLayoutStore>)
+
+    render(<DataSourcesPanel />)
+
+    expect(screen.getAllByText('Chat Only').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Standalone chat').length).toBeGreaterThan(0)
+    expect(screen.getByText(/files in this standalone chat stay only in this chat and are not reused by projects or other chats/i)).toBeInTheDocument()
   })
 
   test('does not render content when panel is closed', () => {

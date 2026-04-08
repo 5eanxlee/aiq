@@ -65,6 +65,11 @@ export const FileListResponseSchema = z.object({
   files: z.array(FileInfoSchema),
 })
 
+/** Preview payload for a single file */
+export const FilePreviewSchema = FileInfoSchema.extend({
+  summary: z.string().nullable().optional(),
+})
+
 /** Response for upload files endpoint */
 export const UploadResponseSchema = z.object({
   job_id: z.string(),
@@ -112,6 +117,7 @@ export type CollectionInfo = z.infer<typeof CollectionInfoSchema>
 export type CollectionListResponse = z.infer<typeof CollectionListResponseSchema>
 export type FileInfo = z.infer<typeof FileInfoSchema>
 export type FileListResponse = z.infer<typeof FileListResponseSchema>
+export type FilePreview = z.infer<typeof FilePreviewSchema>
 export type UploadResponse = z.infer<typeof UploadResponseSchema>
 export type FileProgress = z.infer<typeof FileProgressSchema>
 export type IngestionJobStatus = z.infer<typeof IngestionJobStatusSchema>

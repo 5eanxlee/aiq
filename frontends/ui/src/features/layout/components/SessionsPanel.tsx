@@ -34,7 +34,29 @@ interface Session {
   hasActiveDeepResearch?: boolean
 }
 
+interface ProjectItem {
+  id: string
+  title: string
+  date: Date
+}
+
 interface SessionsPanelProps {
+  /** List of projects to display */
+  projects?: ProjectItem[]
+  /** Whether standalone scope is selected */
+  isStandaloneScope?: boolean
+  /** Callback when standalone scope is selected */
+  onSelectStandalone?: () => void
+  /** Currently selected project ID */
+  selectedProjectId?: string
+  /** Callback when a project is selected */
+  onSelectProject?: (projectId: string) => void
+  /** Callback when new project is clicked */
+  onNewProject?: () => void
+  /** Callback when a project is deleted */
+  onDeleteProject?: (projectId: string) => void
+  /** Callback when a project is renamed */
+  onRenameProject?: (projectId: string, newTitle: string) => void
   /** List of sessions to display */
   sessions?: Session[]
   /** Currently selected session ID */
@@ -56,6 +78,14 @@ interface SessionsPanelProps {
  * Opens from the left side of the screen.
  */
 export const SessionsPanel: FC<SessionsPanelProps> = ({
+  projects = [],
+  isStandaloneScope = false,
+  onSelectStandalone,
+  selectedProjectId,
+  onSelectProject,
+  onNewProject,
+  onDeleteProject,
+  onRenameProject,
   sessions = [],
   selectedSessionId,
   onSelectSession,
@@ -124,6 +154,24 @@ export const SessionsPanel: FC<SessionsPanelProps> = ({
     handleClose()
   }, [onNewSession, handleClose])
 
+  const handleNewProject = useCallback(() => {
+    onNewProject?.()
+    handleClose()
+  }, [onNewProject, handleClose])
+
+  const handleProjectClick = useCallback(
+    (projectId: string) => {
+      onSelectProject?.(projectId)
+      handleClose()
+    },
+    [onSelectProject, handleClose]
+  )
+
+  const handleStandaloneClick = useCallback(() => {
+    onSelectStandalone?.()
+    handleClose()
+  }, [handleClose, onSelectStandalone])
+
   const handleSessionClick = useCallback(
     (sessionId: string) => {
       onSelectSession?.(sessionId)
@@ -140,6 +188,20 @@ export const SessionsPanel: FC<SessionsPanelProps> = ({
 
   // Group sessions by date
   const groupedSessions = groupSessionsByDate(filteredSessions)
+  const scopeDeleteLabel = isStandaloneScope ? 'Delete Chats' : 'Delete Sessions'
+  const scopeDeleteTitle = isStandaloneScope
+    ? 'Delete all standalone chats'
+    : 'Delete all sessions in this project'
+  const newSessionLabel = isStandaloneScope ? 'New Chat' : 'New Session'
+  const newSessionTitle = isStandaloneScope
+    ? 'Start new standalone chat'
+    : 'Start new session'
+  const emptyStateLabel = searchQuery.trim()
+    ? 'No matching sessions'
+    : isStandaloneScope
+      ? 'No standalone chats yet'
+      : 'No sessions yet'
+  const emptyStateActionLabel = isStandaloneScope ? 'Start a new chat' : 'Start a new session'
 
   return (
     <SidePanel
@@ -167,7 +229,7 @@ export const SessionsPanel: FC<SessionsPanelProps> = ({
         </Flex>
       }
     >
-      {/* Delete All + New Session */}
+      {/* Scope actions */}
       <Flex align="center" justify="between" gap="2" className="mb-4">
         <Button
           kind="tertiary"
@@ -175,39 +237,99 @@ export const SessionsPanel: FC<SessionsPanelProps> = ({
           color="danger"
           onClick={handleDeleteAllClick}
           disabled={anySessionBusy}
-          aria-label={anySessionBusy ? 'Delete all sessions (disabled)' : 'Delete all sessions'}
+          aria-label={
+            anySessionBusy
+              ? `${scopeDeleteLabel} (disabled during active operations)`
+              : scopeDeleteLabel
+          }
           title={
             anySessionBusy
               ? 'Cannot delete while operations are in progress'
-              : 'Delete all sessions'
+              : scopeDeleteTitle
           }
         >
           <Flex align="center" gap="1">
             <Trash className="h-4 w-4" />
-            <Text kind="label/regular/sm">Delete All</Text>
+            <Text kind="label/regular/sm">{scopeDeleteLabel}</Text>
           </Flex>
         </Button>
-        <Button
-          kind="tertiary"
-          size="small"
-          onClick={handleNewSession}
-          disabled={isNavigationBlocked}
-          aria-label={
-            isNavigationBlocked
-              ? 'Start new session (disabled during active operations)'
-              : 'Start new session'
-          }
-          title={
-            isNavigationBlocked
-              ? 'Cannot create new session while current session is active'
-              : 'Start new session'
-          }
-        >
-          <Flex align="center" gap="1">
-            <Plus className="h-4 w-4" />
-            <Text kind="label/regular/sm">New Session</Text>
-          </Flex>
-        </Button>
+        <Flex align="center" gap="2">
+          <Button
+            kind="tertiary"
+            size="small"
+            onClick={handleNewProject}
+            disabled={isNavigationBlocked}
+            aria-label={
+              isNavigationBlocked
+                ? 'Start new project (disabled during active operations)'
+                : 'Start new project'
+            }
+            title={
+              isNavigationBlocked
+                ? 'Cannot create a new project while the current session is active'
+                : 'Start new project'
+            }
+          >
+            <Flex align="center" gap="1">
+              <Plus className="h-4 w-4" />
+              <Text kind="label/regular/sm">New Project</Text>
+            </Flex>
+          </Button>
+          <Button
+            kind="tertiary"
+            size="small"
+            onClick={handleNewSession}
+            disabled={isNavigationBlocked}
+            aria-label={
+              isNavigationBlocked
+                ? `${newSessionTitle} (disabled during active operations)`
+                : newSessionTitle
+            }
+            title={
+              isNavigationBlocked
+                ? 'Cannot create new session while current session is active'
+                : newSessionTitle
+            }
+          >
+            <Flex align="center" gap="1">
+              <Plus className="h-4 w-4" />
+              <Text kind="label/regular/sm">{newSessionLabel}</Text>
+            </Flex>
+          </Button>
+        </Flex>
+      </Flex>
+
+      {/* Scope */}
+      <Flex direction="col" gap="2" className="mb-4">
+        <Text kind="label/semibold/xs" className="text-subtle uppercase">
+          Chat Scope
+        </Text>
+        <ScopeRow
+          label="Standalone Chat"
+          description="No shared project files"
+          isSelected={isStandaloneScope}
+          isBusy={isNavigationBlocked}
+          onSelect={handleStandaloneClick}
+        />
+      </Flex>
+
+      {/* Projects */}
+      <Flex direction="col" gap="2" className="mb-4">
+        <Text kind="label/semibold/xs" className="text-subtle uppercase">
+          Projects
+        </Text>
+        {projects.map((project) => (
+          <ProjectRow
+            key={project.id}
+            project={project}
+            isSelected={selectedProjectId === project.id}
+            isBusy={isNavigationBlocked}
+            isMutating={anySessionBusy}
+            onSelect={handleProjectClick}
+            onDelete={onDeleteProject}
+            onRename={onRenameProject}
+          />
+        ))}
       </Flex>
 
       {/* Search */}
@@ -248,11 +370,11 @@ export const SessionsPanel: FC<SessionsPanelProps> = ({
         {filteredSessions.length === 0 && (
           <Flex direction="col" align="center" justify="center" className="flex-1 py-8">
             <Text kind="body/regular/sm" className="text-subtle">
-              {searchQuery.trim() ? 'No matching sessions' : 'No sessions yet'}
+              {emptyStateLabel}
             </Text>
             {!searchQuery.trim() && (
               <Button kind="secondary" size="small" onClick={handleNewSession} className="mt-4">
-                Start a new session
+                {emptyStateActionLabel}
               </Button>
             )}
           </Flex>
@@ -290,6 +412,194 @@ interface SessionItemProps {
   onSelect?: (sessionId: string) => void
   onDelete?: (sessionId: string) => void
   onRename?: (sessionId: string, newTitle: string) => void
+}
+
+interface ProjectRowProps {
+  project: ProjectItem
+  isSelected: boolean
+  isBusy?: boolean
+  isMutating?: boolean
+  onSelect?: (projectId: string) => void
+  onDelete?: (projectId: string) => void
+  onRename?: (projectId: string, newTitle: string) => void
+}
+
+interface ScopeRowProps {
+  label: string
+  description?: string
+  isSelected: boolean
+  isBusy?: boolean
+  onSelect?: () => void
+}
+
+const ScopeRow: FC<ScopeRowProps> = ({
+  label,
+  description,
+  isSelected,
+  isBusy = false,
+  onSelect,
+}) => {
+  const handleSelect = useCallback(() => {
+    if (!isBusy) {
+      onSelect?.()
+    }
+  }, [isBusy, onSelect])
+
+  return (
+    <div
+      role="button"
+      tabIndex={isBusy ? -1 : 0}
+      onClick={handleSelect}
+      onKeyDown={(e) => {
+        if ((e.key === 'Enter' || e.key === ' ') && !isBusy) {
+          e.preventDefault()
+          handleSelect()
+        }
+      }}
+      aria-label={`${label}${description ? ` (${description})` : ''}`}
+      className={`
+        focus-visible:ring-brand flex min-h-10 w-full items-center rounded-md border p-2 text-left
+        outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset
+        ${isBusy ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}
+        ${
+          isSelected
+            ? 'bg-surface-raised border-accent-primary border'
+            : 'border-base hover:bg-surface-raised-50 bg-transparent'
+        }
+      `}
+    >
+      <Flex direction="col" gap="1" className="min-w-0 flex-1">
+        <Text kind="body/regular/sm" className="text-primary truncate">
+          {label}
+        </Text>
+        {description && (
+          <Text kind="body/regular/xs" className="text-subtle truncate">
+            {description}
+          </Text>
+        )}
+      </Flex>
+    </div>
+  )
+}
+
+const ProjectRow: FC<ProjectRowProps> = ({
+  project,
+  isSelected,
+  isBusy = false,
+  isMutating = false,
+  onSelect,
+  onDelete,
+  onRename,
+}) => {
+  const [isHovered, setIsHovered] = useState(false)
+  const [isEditing, setIsEditing] = useState(false)
+  const [editValue, setEditValue] = useState(project.title)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (isEditing && inputRef.current) {
+      inputRef.current.focus()
+      inputRef.current.select()
+    }
+  }, [isEditing])
+
+  const handleClick = useCallback(() => {
+    if (!isEditing && !isBusy) {
+      onSelect?.(project.id)
+    }
+  }, [isEditing, isBusy, onSelect, project.id])
+
+  const handleSaveRename = useCallback(() => {
+    const trimmedValue = editValue.trim()
+    if (trimmedValue && trimmedValue !== project.title) {
+      onRename?.(project.id, trimmedValue)
+    }
+    setIsEditing(false)
+  }, [editValue, onRename, project.id, project.title])
+
+  return (
+    <div
+      role="button"
+      tabIndex={isBusy ? -1 : 0}
+      onClick={handleClick}
+      onKeyDown={(e) => e.key === 'Enter' && !isEditing && !isBusy && handleClick()}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      className={`
+        focus-visible:ring-brand group flex h-10 w-full items-center gap-2
+        rounded-md border p-2 text-left
+        outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset
+        ${isBusy ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}
+        ${
+          isSelected
+            ? 'bg-surface-raised border-accent-primary border'
+            : 'border-base hover:bg-surface-raised-50 bg-transparent'
+        }
+      `}
+    >
+      {isEditing ? (
+        <input
+          ref={inputRef}
+          type="text"
+          value={editValue}
+          onChange={(e) => setEditValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              handleSaveRename()
+            } else if (e.key === 'Escape') {
+              e.preventDefault()
+              setEditValue(project.title)
+              setIsEditing(false)
+            }
+          }}
+          onBlur={handleSaveRename}
+          onClick={(e) => e.stopPropagation()}
+          className="
+            bg-surface-base border-accent-primary text-primary h-8 min-w-0 flex-1 rounded border
+            px-2 py-1 text-sm outline-none
+          "
+          aria-label="Edit project title"
+        />
+      ) : (
+        <>
+          <Text kind="body/regular/sm" className="text-primary min-w-0 flex-1 truncate">
+            {project.title}
+          </Text>
+          {isHovered && (
+            <Flex align="center" gap="1" className="shrink-0">
+              <Button
+                kind="tertiary"
+                size="tiny"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setEditValue(project.title)
+                  setIsEditing(true)
+                }}
+                disabled={isBusy || isMutating}
+                aria-label="Rename project"
+              >
+                <Edit height={16} width={16} />
+              </Button>
+              <Button
+                kind="tertiary"
+                size="tiny"
+                color="danger"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onDelete?.(project.id)
+                }}
+                disabled={isBusy || isMutating}
+                aria-label="Delete project"
+              >
+                <Trash height={16} width={16} />
+              </Button>
+            </Flex>
+          )}
+        </>
+      )}
+    </div>
+  )
 }
 
 const SessionItem: FC<SessionItemProps> = ({

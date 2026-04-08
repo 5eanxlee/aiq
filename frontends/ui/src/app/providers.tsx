@@ -8,6 +8,7 @@
  * - AppConfigProvider (runtime server-side config)
  * - ThemeProvider (KUI dark/light mode)
  * - SessionProvider (NextAuth)
+ * - ActiveCollectionSync (keeps project/session file collections hydrated)
  * - DeepResearchRestorer (checks for active deep research jobs on mount)
  */
 
@@ -16,9 +17,14 @@
 import { type ReactNode, useEffect, useRef } from 'react'
 import { SessionProvider } from 'next-auth/react'
 import { ThemeProvider } from '@/adapters/ui'
+import { createProjectsClient, type ProjectFromAPI, type SessionFromAPI } from '@/adapters/api'
+import { useAuth } from '@/adapters/auth'
+import { ActiveCollectionSync } from '@/features/documents'
 import { AppConfigProvider, type AppConfig } from '@/shared/context'
 import { useLayoutStore } from '@/features/layout'
+import type { Conversation } from '@/features/chat'
 import { useChatStore } from '@/features/chat/store'
+import { useProjectsStore, type Project } from '@/features/projects'
 import type { ThemeMode } from '@/features/layout'
 
 interface ProvidersProps {
@@ -128,6 +134,249 @@ const ThemeWrapper = ({ children }: { children: ReactNode }): ReactNode => {
   )
 }
 
+const parseDateValue = (value: unknown): Date => {
+  if (value instanceof Date) return value
+  if (typeof value === 'string' || typeof value === 'number') {
+    const parsed = new Date(value)
+    if (!Number.isNaN(parsed.getTime())) return parsed
+  }
+  return new Date()
+}
+
+const reviveDates = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    return value.map(reviveDates)
+  }
+  if (!value || typeof value !== 'object') {
+    return value
+  }
+
+  const record = value as Record<string, unknown>
+  return Object.fromEntries(
+    Object.entries(record).map(([key, childValue]) => {
+      if (
+        typeof childValue === 'string' &&
+        (key === 'timestamp' || key.endsWith('At') || key.endsWith('_at')) &&
+        !Number.isNaN(Date.parse(childValue))
+      ) {
+        return [key, new Date(childValue)]
+      }
+      return [key, reviveDates(childValue)]
+    })
+  )
+}
+
+const mapProjectFromAPI = (project: ProjectFromAPI): Project => ({
+  id: project.id,
+  ownerId: project.owner_id,
+  title: project.title,
+  description: project.description ?? null,
+  knowledgeCollectionName: project.knowledge_collection_name,
+  createdAt: parseDateValue(project.created_at),
+  updatedAt: parseDateValue(project.updated_at),
+})
+
+const mapConversationFromAPI = (userId: string, session: SessionFromAPI): Conversation => {
+  const snapshot = session.snapshot
+  const messages = Array.isArray(snapshot?.messages)
+    ? (reviveDates(snapshot.messages) as Conversation['messages'])
+    : []
+
+  return {
+    id: session.id,
+    userId,
+    projectId: session.project_id,
+    title: session.title,
+    messages,
+    createdAt: parseDateValue(session.created_at),
+    updatedAt: parseDateValue(session.updated_at),
+    knowledgeCollectionName: session.knowledge_collection_name,
+    knowledgeCollectionNameOverride: session.knowledge_collection_name_override ?? null,
+    enabledDataSourceIds: snapshot?.enabled_data_source_ids ?? [],
+  }
+}
+
+const ProjectStateHydrator = ({ children }: { children: ReactNode }): ReactNode => {
+  const { user, idToken } = useAuth()
+  const setProjects = useProjectsStore((state) => state.setProjects)
+  const setCurrentProjectId = useProjectsStore((state) => state.setCurrentProjectId)
+  const markHydrated = useProjectsStore((state) => state.markHydrated)
+  const setSyncing = useProjectsStore((state) => state.setSyncing)
+  const setProjectsError = useProjectsStore((state) => state.setError)
+  const currentProjectId = useProjectsStore((state) => state.currentProjectId)
+
+  const replaceUserConversations = useChatStore((state) => state.replaceUserConversations)
+  const currentConversation = useChatStore((state) => state.currentConversation)
+
+  const hydratedUserRef = useRef<string | null>(null)
+  const snapshotSyncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    const userId = user?.id
+    if (!userId) {
+      markHydrated(false)
+      hydratedUserRef.current = null
+      return
+    }
+
+    if (hydratedUserRef.current === userId) {
+      return
+    }
+
+    let cancelled = false
+
+    const hydrate = async () => {
+      setSyncing(true)
+      setProjectsError(null)
+
+      try {
+        const client = createProjectsClient({ authToken: idToken })
+        let projects = await client.listProjects()
+        const totalSessions = projects.reduce((sum, project) => sum + project.sessions.length, 0)
+
+        if (totalSessions === 0) {
+          const localConversations = useChatStore
+            .getState()
+            .getUserConversations()
+            .map((conversation) => ({
+              ...conversation,
+              createdAt: parseDateValue(conversation.createdAt),
+              updatedAt: parseDateValue(conversation.updatedAt),
+            }))
+
+          if (localConversations.length > 0) {
+            const targetProject =
+              projects[0] ??
+              (await client.createProject({
+                title: 'General',
+              }))
+
+            for (const conversation of localConversations) {
+              await client.createSession(targetProject.id, {
+                id: conversation.id,
+                title: conversation.title,
+                knowledge_collection_name_override:
+                  conversation.knowledgeCollectionNameOverride ??
+                  conversation.knowledgeCollectionName ??
+                  conversation.id,
+                created_at: conversation.createdAt.toISOString(),
+                updated_at: conversation.updatedAt.toISOString(),
+              })
+
+              await client.putSessionSnapshot(conversation.id, {
+                messages: JSON.parse(JSON.stringify(conversation.messages)),
+                enabled_data_source_ids: conversation.enabledDataSourceIds ?? [],
+                updated_at: conversation.updatedAt.toISOString(),
+              })
+            }
+
+            projects = await client.listProjects()
+          }
+        }
+
+        if (cancelled) return
+
+        const mappedProjects = projects.map(mapProjectFromAPI)
+        const mappedConversations = projects.flatMap((project) =>
+          project.sessions.map((session) => mapConversationFromAPI(userId, session))
+        )
+
+        setProjects(mappedProjects)
+
+        const preferredConversationId =
+          currentConversation?.userId === userId ? currentConversation.id : null
+        replaceUserConversations(userId, mappedConversations, preferredConversationId)
+
+        const nextProjectId =
+          mappedConversations.find((conversation) => conversation.id === preferredConversationId)?.projectId ??
+          currentProjectId ??
+          mappedProjects[0]?.id ??
+          null
+
+        setCurrentProjectId(nextProjectId)
+        hydratedUserRef.current = userId
+        markHydrated(true)
+      } catch (error) {
+        if (!cancelled) {
+          setProjectsError(error instanceof Error ? error.message : 'Failed to load projects')
+          markHydrated(true)
+        }
+      } finally {
+        if (!cancelled) {
+          setSyncing(false)
+        }
+      }
+    }
+
+    void hydrate()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    user?.id,
+    idToken,
+    currentConversation?.id,
+    currentConversation?.projectId,
+    currentProjectId,
+    setProjects,
+    setCurrentProjectId,
+    setProjectsError,
+    setSyncing,
+    markHydrated,
+    replaceUserConversations,
+  ])
+
+  useEffect(() => {
+    if (!user?.id || !currentConversation?.id || !currentConversation.projectId) {
+      return
+    }
+
+    if (snapshotSyncTimeoutRef.current) {
+      clearTimeout(snapshotSyncTimeoutRef.current)
+    }
+
+    snapshotSyncTimeoutRef.current = setTimeout(() => {
+      const client = createProjectsClient({ authToken: idToken })
+      const messages = JSON.parse(JSON.stringify(currentConversation.messages)) as Array<Record<string, unknown>>
+      void (async () => {
+        try {
+          await client.createSession(currentConversation.projectId!, {
+            id: currentConversation.id,
+            title: currentConversation.title,
+            knowledge_collection_name_override: currentConversation.knowledgeCollectionNameOverride ?? null,
+            created_at: new Date(currentConversation.createdAt).toISOString(),
+            updated_at: new Date(currentConversation.updatedAt).toISOString(),
+          })
+          await client.putSessionSnapshot(currentConversation.id, {
+            messages,
+            enabled_data_source_ids: currentConversation.enabledDataSourceIds ?? [],
+            updated_at: new Date().toISOString(),
+          })
+        } catch {
+          // Snapshot sync is best-effort; the next edit will retry.
+        }
+      })()
+    }, 300)
+
+    return () => {
+      if (snapshotSyncTimeoutRef.current) {
+        clearTimeout(snapshotSyncTimeoutRef.current)
+        snapshotSyncTimeoutRef.current = null
+      }
+    }
+  }, [
+    user?.id,
+    idToken,
+    currentConversation?.id,
+    currentConversation?.projectId,
+    currentConversation?.messages,
+    currentConversation?.enabledDataSourceIds,
+  ])
+
+  return <>{children}</>
+}
+
 /**
  * Restores deep research state on conversation load.
  * - Reconnects to running/submitted jobs for page refresh recovery.
@@ -163,7 +412,10 @@ const DeepResearchRestorer = ({ children }: { children: ReactNode }): ReactNode 
 export const Providers = ({ children, config }: ProvidersProps): ReactNode => {
   const content = (
     <ThemeWrapper>
-      <DeepResearchRestorer>{children}</DeepResearchRestorer>
+      <ProjectStateHydrator>
+        <ActiveCollectionSync />
+        <DeepResearchRestorer>{children}</DeepResearchRestorer>
+      </ProjectStateHydrator>
     </ThemeWrapper>
   )
 

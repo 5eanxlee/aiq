@@ -28,7 +28,10 @@ from __future__ import annotations
 import asyncio
 import importlib
 import logging
+import os
+import tempfile
 import uuid
+from functools import partial
 from typing import Any
 
 from .callbacks import AgentEventCallback
@@ -55,6 +58,210 @@ def _normalize_trace_id(trace_id: int | str | None) -> int | None:
         return int(trace_id, 16)
     except ValueError:
         return int(trace_id)
+
+
+def _extract_report_title(report: str, fallback: str) -> str:
+    for line in report.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("#"):
+            return stripped.lstrip("#").strip() or fallback
+        if len(stripped) > 5:
+            return stripped[:120]
+    return fallback
+
+
+def _load_all_job_events_sync(db_url: str, job_id: str) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    after_id = 0
+    while True:
+        batch = EventStore.get_events(db_url, job_id, after_id=after_id, limit=500)
+        if not batch:
+            break
+        events.extend(batch)
+        after_id = batch[-1].get("_id", after_id)
+        if len(batch) < 500:
+            break
+    return events
+
+
+def _collect_citation_manifest(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    citations: list[dict[str, Any]] = []
+    seen: set[tuple[str | None, str, str]] = set()
+    for event in events:
+        if event.get("type") != "artifact.update":
+            continue
+        payload = event.get("data", {})
+        artifact_type = payload.get("type")
+        if artifact_type not in {"citation_source", "citation_use"}:
+            continue
+        url = payload.get("url")
+        content = payload.get("content")
+        if not isinstance(content, str):
+            continue
+        key = (url, artifact_type, content[:200])
+        if key in seen:
+            continue
+        seen.add(key)
+        citations.append(
+            {
+                "type": artifact_type,
+                "url": url,
+                "content": content,
+                "timestamp": event.get("timestamp"),
+            }
+        )
+    return citations
+
+
+def _build_project_memory_markdown(
+    *,
+    title: str,
+    report: str,
+    session_title: str,
+    job_id: str,
+    citations: list[dict[str, Any]],
+) -> str:
+    lines = [
+        f"# {title}",
+        "",
+        f"Session: {session_title}",
+        f"Deep research job ID: {job_id}",
+        "",
+        "## Report",
+        "",
+        report.strip(),
+    ]
+    if citations:
+        lines.extend(["", "## Citation Manifest", ""])
+        for citation in citations:
+            url = citation.get("url") or "no-url"
+            citation_type = citation.get("type") or "citation"
+            content = str(citation.get("content") or "").strip().replace("\n", " ")
+            snippet = content[:280] + ("..." if len(content) > 280 else "")
+            lines.append(f"- [{citation_type}] {url}: {snippet}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _submit_markdown_to_collection(
+    *,
+    collection_name: str,
+    artifact_id: str,
+    title: str,
+    body_markdown: str,
+) -> bool:
+    try:
+        from aiq_agent.knowledge.factory import get_active_ingestor
+    except Exception:
+        return False
+
+    ingestor = get_active_ingestor()
+    if ingestor is None:
+        return False
+
+    try:
+        if ingestor.get_collection(collection_name) is None:
+            ingestor.create_collection(
+                name=collection_name,
+                description=f"Project memory for {collection_name}",
+                metadata={"memory_scope": "project"},
+            )
+
+        safe_title = "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in title)[:80]
+        artifact_filename = f"{artifact_id}_{safe_title or 'artifact'}.md"
+        with tempfile.NamedTemporaryFile("w", delete=False, suffix=".md", encoding="utf-8") as tmp:
+            tmp.write(body_markdown)
+            temp_path = tmp.name
+
+        ingestor.submit_job(
+            [temp_path],
+            collection_name,
+            config={
+                "cleanup_files": True,
+                "original_filenames": [artifact_filename],
+                "custom_metadata": [{"artifact_id": artifact_id, "title": title, "artifact_kind": "deep_research_report"}],
+            },
+        )
+        return True
+    except Exception as exc:
+        logger.warning(
+            "Failed to submit project-memory markdown for artifact %s into %s: %s",
+            artifact_id,
+            collection_name,
+            exc,
+        )
+        if "temp_path" in locals():
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+        return False
+
+
+async def _promote_report_to_project_memory(
+    *,
+    db_url: str,
+    job_id: str,
+    session_id: str | None,
+    report: str,
+) -> None:
+    if not session_id or not report.strip():
+        return
+
+    try:
+        from aiq_api.app_state import get_app_state_store
+    except Exception as exc:
+        logger.debug("Project memory promotion unavailable for job %s: %s", job_id, exc)
+        return
+
+    store = get_app_state_store()
+    session = await store.get_session(session_id, include_snapshot=False)
+    if session is None:
+        return
+
+    project = await store.get_project(session["project_id"])
+    if project is None:
+        return
+
+    loop = asyncio.get_running_loop()
+    events = await loop.run_in_executor(None, _load_all_job_events_sync, db_url, job_id)
+    citations = _collect_citation_manifest(events)
+    title = _extract_report_title(report, session["title"])
+    body_markdown = _build_project_memory_markdown(
+        title=title,
+        report=report,
+        session_title=session["title"],
+        job_id=job_id,
+        citations=citations,
+    )
+    artifact = await store.create_project_artifact(
+        project_id=project["id"],
+        session_id=session_id,
+        kind="deep_research_report",
+        title=title,
+        body_markdown=body_markdown,
+        citation_manifest=citations,
+    )
+
+    promoted = await loop.run_in_executor(
+        None,
+        partial(
+            _submit_markdown_to_collection,
+            collection_name=project["knowledge_collection_name"],
+            artifact_id=artifact["id"],
+            title=title,
+            body_markdown=body_markdown,
+        ),
+    )
+    logger.info(
+        "Promoted deep research job %s to project %s artifact %s (knowledge=%s)",
+        job_id,
+        project["id"],
+        artifact["id"],
+        promoted,
+    )
 
 
 class CancellationMonitor:
@@ -477,6 +684,15 @@ async def run_agent_job(
                 # so the UI sees completion before exporter flush and cleanup
                 report = _extract_result(result)
                 await job_store.update_status(job_id, JobStatus.SUCCESS, output={"report": report})
+                try:
+                    await _promote_report_to_project_memory(
+                        db_url=db_url,
+                        job_id=job_id,
+                        session_id=parent_conversation_id,
+                        report=report,
+                    )
+                except Exception as exc:
+                    logger.warning("Project-memory promotion failed for job %s: %s", job_id, exc)
                 logger.info("Job %s completed (report: %d chars)", job_id, len(report))
 
     except asyncio.CancelledError:

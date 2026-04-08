@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { render, screen } from '@/test-utils'
+import { fireEvent, render, screen } from '@/test-utils'
 import userEvent from '@testing-library/user-event'
 import { vi, describe, test, expect, beforeEach } from 'vitest'
 import { InputArea } from './InputArea'
@@ -14,6 +14,31 @@ let mockIsDeepResearchStreaming = false
 let mockDeepResearchStatus: string | null = null
 let mockDeepResearchOwnerConversationId: string | null = null
 let mockConversationMessages: unknown[] | undefined = []
+const PROJECT_COLLECTION = 'project_workspace_1'
+const PROJECT_ID = 'project-1'
+const mockEnsureSession = vi.fn(() => 'session-1')
+const mockCurrentConversation: {
+  id: string
+  projectId?: string
+  knowledgeCollectionName?: string
+  messages: unknown[] | undefined
+} = {
+  id: 'session-1',
+  projectId: PROJECT_ID,
+  knowledgeCollectionName: PROJECT_COLLECTION,
+  messages: mockConversationMessages,
+}
+const mockProjectsState = {
+  currentProjectId: PROJECT_ID,
+  projects: [
+    {
+      id: PROJECT_ID,
+      title: 'Alpha Project',
+      knowledgeCollectionName: PROJECT_COLLECTION,
+    },
+  ],
+  getCurrentProject: () => mockProjectsState.projects[0],
+}
 
 vi.mock('@/features/chat', () => ({
   useChat: vi.fn(() => ({
@@ -30,17 +55,30 @@ vi.mock('@/features/chat', () => ({
     respondToInteraction: mockRespondToInteraction,
     pendingInteraction: null,
   })),
-  useChatStore: vi.fn((selector) => {
-    const state = {
-      currentConversation: { id: 'session-1', messages: mockConversationMessages },
-      ensureSession: vi.fn(() => 'session-1'),
-      setRespondToInteractionFn: vi.fn(),
-      deepResearchStatus: mockDeepResearchStatus,
-      isDeepResearchStreaming: mockIsDeepResearchStreaming,
-      deepResearchOwnerConversationId: mockDeepResearchOwnerConversationId,
+  useChatStore: Object.assign(
+    vi.fn((selector) => {
+      mockCurrentConversation.messages = mockConversationMessages
+      const state = {
+        currentConversation: mockCurrentConversation,
+        ensureSession: mockEnsureSession,
+        setRespondToInteractionFn: vi.fn(),
+        deepResearchStatus: mockDeepResearchStatus,
+        isDeepResearchStreaming: mockIsDeepResearchStreaming,
+        deepResearchOwnerConversationId: mockDeepResearchOwnerConversationId,
+      }
+      return selector(state)
+    }),
+    {
+      getState: () => ({
+        currentConversation: mockCurrentConversation,
+        ensureSession: mockEnsureSession,
+        setRespondToInteractionFn: vi.fn(),
+        deepResearchStatus: mockDeepResearchStatus,
+        isDeepResearchStreaming: mockIsDeepResearchStreaming,
+        deepResearchOwnerConversationId: mockDeepResearchOwnerConversationId,
+      }),
     }
-    return selector(state)
-  }),
+  ),
   useIsCurrentSessionBusy: vi.fn(() => false),
 }))
 
@@ -51,10 +89,20 @@ const mockSetDataSourcePanelTab = vi.fn()
 vi.mock('../store', () => ({
   useLayoutStore: vi.fn(() => ({
     openRightPanel: mockOpenRightPanel,
-    setDataSourcePanelTab: mockSetDataSourcePanelTab,
+    rightPanel: null,
+    closeRightPanel: vi.fn(),
+    setDataSourcesPanelTab: mockSetDataSourcePanelTab,
+    knowledgeLayerAvailable: true,
     enabledDataSourceIds: ['source-1', 'source-2'],
   })),
 }))
+
+vi.mock('@/features/projects', () => {
+  const useProjectsStore = Object.assign(vi.fn((selector) => selector(mockProjectsState)), {
+    getState: () => mockProjectsState,
+  })
+  return { useProjectsStore }
+})
 
 // Mock useAppConfig
 vi.mock('@/shared/context', () => ({
@@ -105,6 +153,19 @@ describe('InputArea', () => {
     mockDeepResearchStatus = null
     mockDeepResearchOwnerConversationId = null
     mockConversationMessages = []
+    mockCurrentConversation.id = 'session-1'
+    mockCurrentConversation.projectId = PROJECT_ID
+    mockCurrentConversation.knowledgeCollectionName = PROJECT_COLLECTION
+    mockCurrentConversation.messages = mockConversationMessages
+    mockEnsureSession.mockReturnValue('session-1')
+    mockProjectsState.currentProjectId = PROJECT_ID
+    mockProjectsState.projects = [
+      {
+        id: PROJECT_ID,
+        title: 'Alpha Project',
+        knowledgeCollectionName: PROJECT_COLLECTION,
+      },
+    ]
     // Reset mocks to defaults - clearAllMocks doesn't reset mockReturnValue
     vi.mocked(useIsCurrentSessionBusy).mockReturnValue(false)
     vi.mocked(useChat).mockReturnValue({
@@ -256,6 +317,27 @@ describe('InputArea', () => {
     render(<InputArea isAuthenticated={true} />)
 
     expect(screen.getByRole('button', { name: /attach files/i })).toBeInTheDocument()
+  })
+
+  test('uploads attachments into the project collection when the session has no explicit collection', async () => {
+    mockCurrentConversation.knowledgeCollectionName = undefined
+
+    const { container } = render(<InputArea isAuthenticated={true} />)
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+
+    fireEvent.change(fileInput, {
+      target: {
+        files: [new File(['pdf'], 'project-doc.pdf', { type: 'application/pdf' })],
+      },
+    })
+
+    expect(mockEnsureSession).toHaveBeenCalled()
+    expect(mockSetDataSourcePanelTab).toHaveBeenCalledWith('files')
+    expect(mockOpenRightPanel).toHaveBeenCalledWith('data-sources')
+    expect(mockUploadFiles).toHaveBeenCalledWith(
+      [expect.objectContaining({ name: 'project-doc.pdf' })],
+      PROJECT_COLLECTION
+    )
   })
 
   // Note: Research panel button was moved to ResearchPanel component as a toggle tag

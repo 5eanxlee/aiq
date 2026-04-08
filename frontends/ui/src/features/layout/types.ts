@@ -13,7 +13,7 @@ import type { DataSourceFromAPI } from '@/adapters/api'
 export type ThemeMode = 'light' | 'dark' | 'system'
 
 /** Panels that can be opened on the right side */
-export type RightPanelType = 'research' | 'data-sources' | 'settings' | null
+export type RightPanelType = 'research' | 'data-sources' | 'providers' | 'settings' | null
 
 /** Tabs within the Research panel */
 export type ResearchPanelTab = 'plan' | 'tasks' | 'thinking' | 'citations' | 'report'

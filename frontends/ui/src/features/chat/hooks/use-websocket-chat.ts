@@ -20,6 +20,7 @@
 'use client'
 
 import { useCallback, useRef, useEffect, useState } from 'react'
+import { createProjectsClient } from '@/adapters/api'
 import {
   NATWebSocketClient,
   createNATWebSocketClient,
@@ -36,7 +37,9 @@ import { useConnectionRecovery } from './use-connection-recovery'
 import { useLayoutStore } from '@/features/layout/store'
 import { useDocumentsStore } from '@/features/documents/store'
 import { useAuth } from '@/adapters/auth'
+import { useProjectsStore } from '@/features/projects'
 import { isLikelyAuthRelatedTransportError } from '../lib/transport-auth-signals'
+import { resolveKnowledgeCollectionName } from '../lib/resolve-knowledge-collection'
 import type {
   Conversation,
   PromptType,
@@ -81,7 +84,7 @@ interface UseWebSocketChatOptions {
 
 interface UseWebSocketChatReturn {
   /** Send a message via WebSocket */
-  sendMessage: (content: string) => void
+  sendMessage: (content: string) => Promise<void>
   /** Respond to a pending interaction (clarification, approval, etc.) */
   respondToInteraction: (response: string) => void
   /** Disconnect from the WebSocket server */
@@ -153,7 +156,7 @@ export const useWebSocketChat = (options: UseWebSocketChatOptions = {}): UseWebS
   // Ref to track the current status for detecting status changes
   const currentStatusRef = useRef<StatusType | null>(null)
 
-  const { user, authRequired, error: authError } = useAuth()
+  const { user, idToken, authRequired, error: authError } = useAuth()
 
   // Chat store
   const {
@@ -182,6 +185,8 @@ export const useWebSocketChat = (options: UseWebSocketChatOptions = {}): UseWebS
     setStreaming,
     clearReportContent,
     createConversation: storeCreateConversation,
+    ensureSession,
+    patchConversation,
     setCurrentUser,
     getUserConversations,
     selectConversation: storeSelectConversation,
@@ -619,20 +624,66 @@ export const useWebSocketChat = (options: UseWebSocketChatOptions = {}): UseWebS
    * Send a message via WebSocket
    */
   const sendMessage = useCallback(
-    (content: string) => {
+    async (content: string) => {
       if (!content.trim()) return
+
+      const ensuredSessionId = ensureSession()
+      if (!ensuredSessionId) {
+        addErrorCard('system.unknown', 'No active project')
+        return
+      }
+
+      try {
+        const conversation = useChatStore
+          .getState()
+          .getUserConversations()
+          .find((item) => item.id === ensuredSessionId)
+
+        if (conversation?.projectId) {
+          const client = createProjectsClient({ authToken: idToken })
+          const session = await client.createSession(conversation.projectId, {
+            id: conversation.id,
+            title: conversation.title,
+            knowledge_collection_name_override: conversation.knowledgeCollectionNameOverride ?? null,
+            created_at: new Date(conversation.createdAt).toISOString(),
+            updated_at: new Date(conversation.updatedAt).toISOString(),
+          })
+
+          patchConversation(conversation.id, {
+            projectId: session.project_id,
+            knowledgeCollectionName: session.knowledge_collection_name,
+            knowledgeCollectionNameOverride: session.knowledge_collection_name_override ?? null,
+          })
+        }
+      } catch (error) {
+        addErrorCard(
+          'agent.response_failed',
+          error instanceof Error ? error.message : 'Failed to prepare session'
+        )
+        return
+      }
 
       // Collect metadata about data sources and files before adding user message
       const layoutState = useLayoutStore.getState()
       const enabledDataSources = layoutState.enabledDataSourceIds
 
       // Get session files
-      const sessionId = useChatStore.getState().currentConversation?.id
+      const conversation = useChatStore.getState().currentConversation
+      const sessionId = conversation?.id
+      const projectsState = useProjectsStore.getState()
+      const currentProject =
+        conversation?.projectId
+          ? projectsState.projects.find((project) => project.id === conversation.projectId)
+          : projectsState.getCurrentProject()
+      const collectionName = resolveKnowledgeCollectionName(
+        conversation,
+        currentProject?.knowledgeCollectionName
+      ) ?? sessionId
       const trackedFiles = useDocumentsStore.getState().trackedFiles
-      const sessionFiles = sessionId
+      const sessionFiles = collectionName
         ? trackedFiles.filter(
             (f) =>
-              f.collectionName === sessionId && (f.status === 'ingesting' || f.status === 'success')
+              f.collectionName === collectionName && (f.status === 'ingesting' || f.status === 'success')
           )
         : []
 
@@ -715,10 +766,13 @@ export const useWebSocketChat = (options: UseWebSocketChatOptions = {}): UseWebS
       }
     },
     [
+      ensureSession,
       addUserMessage,
       addErrorCard,
       clearReportContent,
       clearPendingInteraction,
+      idToken,
+      patchConversation,
       setCurrentStatus,
       setStreaming,
       setLoading,

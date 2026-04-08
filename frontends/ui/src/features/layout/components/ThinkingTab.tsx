@@ -73,29 +73,11 @@ const mapToolCallToToolCallInfo = (toolCall: DeepResearchToolCall): ToolCallInfo
  * Consumes dedicated state arrays from the chat store.
  */
 export const ThinkingTab: FC = () => {
-  const deepResearchLLMSteps = useChatStore((state) => state.deepResearchLLMSteps)
-  const deepResearchToolCalls = useChatStore((state) => state.deepResearchToolCalls)
-
   const [activeSubTab, setActiveSubTab] = useState<ThinkingSubTab>('agents')
 
   const handleSubTabChange = useCallback((value: string) => {
     setActiveSubTab(value as ThinkingSubTab)
   }, [])
-
-  const thoughtTraces = useMemo(() => {
-    return deepResearchLLMSteps
-      .map(mapLLMStepToThoughtInfo)
-      .filter((thought) => {
-        if (thought.isStreaming) return true
-        const hasContent = thought.content && thought.content.trim().length > 0
-        const hasThinking = thought.thinking && thought.thinking.trim().length > 0
-        return hasContent || hasThinking
-      })
-  }, [deepResearchLLMSteps])
-
-  const toolCalls = useMemo(() => {
-    return deepResearchToolCalls.map(mapToolCallToToolCallInfo)
-  }, [deepResearchToolCalls])
 
   return (
     <Flex direction="col" gap="4" className="h-full min-h-0">
@@ -116,11 +98,38 @@ export const ThinkingTab: FC = () => {
 
       {/* Sub-tab content */}
       <div className="flex-1 min-h-0">
-        {activeSubTab === 'thoughts' && <ThoughtTracesTab thoughtTraces={thoughtTraces} />}
+        {activeSubTab === 'thoughts' && <ConnectedThoughtTracesTab />}
         {activeSubTab === 'agents' && <AgentsTab />}
-        {activeSubTab === 'tools' && <ToolCallsTab toolCalls={toolCalls} />}
+        {activeSubTab === 'tools' && <ConnectedToolCallsTab />}
         {activeSubTab === 'files' && <FilesTab />}
       </div>
     </Flex>
   )
+}
+
+const ConnectedThoughtTracesTab: FC = () => {
+  const deepResearchLLMSteps = useChatStore((state) => state.deepResearchLLMSteps)
+
+  const thoughtTraces = useMemo(() => {
+    return deepResearchLLMSteps
+      .map(mapLLMStepToThoughtInfo)
+      .filter((thought) => {
+        if (thought.isStreaming) return true
+        const hasContent = thought.content && thought.content.trim().length > 0
+        const hasThinking = thought.thinking && thought.thinking.trim().length > 0
+        return hasContent || hasThinking
+      })
+  }, [deepResearchLLMSteps])
+
+  return <ThoughtTracesTab thoughtTraces={thoughtTraces} />
+}
+
+const ConnectedToolCallsTab: FC = () => {
+  const deepResearchToolCalls = useChatStore((state) => state.deepResearchToolCalls)
+
+  const toolCalls = useMemo(() => {
+    return deepResearchToolCalls.map(mapToolCallToToolCallInfo)
+  }, [deepResearchToolCalls])
+
+  return <ToolCallsTab toolCalls={toolCalls} />
 }

@@ -50,7 +50,11 @@ export const AgentResponse: FC<AgentResponseProps> = ({
   deepResearchJobStatus,
 }) => {
   const { openRightPanel, setResearchPanelTab } = useLayoutStore()
-  const { reportContent, deepResearchJobId, isDeepResearchStreaming, reconnectToActiveJob, deepResearchStreamLoaded } = useChatStore()
+  const reportContent = useChatStore((state) => state.reportContent)
+  const deepResearchJobId = useChatStore((state) => state.deepResearchJobId)
+  const isDeepResearchStreaming = useChatStore((state) => state.isDeepResearchStreaming)
+  const reconnectToActiveJob = useChatStore((state) => state.reconnectToActiveJob)
+  const deepResearchStreamLoaded = useChatStore((state) => state.deepResearchStreamLoaded)
   const { importJobStream, isLoading, error } = useLoadJobData()
 
   // Determine if we should show the action button

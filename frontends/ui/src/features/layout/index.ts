@@ -14,6 +14,7 @@ export {
   SessionsPanel,
   ChatArea,
   InputArea,
+  ProvidersPanel,
   SettingsPanel,
 } from './components'
 

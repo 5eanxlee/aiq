@@ -24,6 +24,7 @@ from fastapi import HTTPException
 from aiq_agent.knowledge.base import BaseIngestor
 from aiq_agent.knowledge.schema import CollectionInfo
 
+from ..document_storage import delete_stored_collection
 from ..models.requests import CreateCollectionRequest
 
 logger = logging.getLogger(__name__)
@@ -109,6 +110,10 @@ def add_collection_routes(router: APIRouter):
             success = ingestor.delete_collection(name)
             if not success:
                 raise HTTPException(status_code=500, detail=f"Failed to delete collection '{name}'")
+            try:
+                delete_stored_collection(name)
+            except Exception as cleanup_error:
+                logger.warning(f"Collection '{name}' deleted but stored uploads could not be cleaned up: {cleanup_error}")
             return {"success": True, "collection": name}
         except HTTPException:
             raise

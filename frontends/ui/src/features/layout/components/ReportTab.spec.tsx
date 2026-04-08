@@ -2,16 +2,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { render, screen } from '@/test-utils'
-import { vi, describe, test, expect } from 'vitest'
+import { vi, describe, test, expect, beforeEach } from 'vitest'
 import { ReportTab } from './ReportTab'
+
+let mockReportContent = ''
+let mockReportContentCategory: string | null = null
+let mockIsStreaming = false
+let mockCurrentStatus: string | null = null
+
+const getMockState = () => ({
+  reportContent: mockReportContent,
+  reportContentCategory: mockReportContentCategory,
+  isStreaming: mockIsStreaming,
+  currentStatus: mockCurrentStatus,
+})
 
 // Mock the chat store
 vi.mock('@/features/chat', () => ({
-  useChatStore: vi.fn(() => ({
-    reportContent: '',
-    isStreaming: false,
-    currentStatus: null,
-  })),
+  useChatStore: vi.fn((selector?: (state: ReturnType<typeof getMockState>) => unknown) => {
+    const state = getMockState()
+    return selector ? selector(state) : state
+  }),
 }))
 
 // Mock MarkdownRenderer
@@ -29,9 +40,14 @@ vi.mock('./ExportFooter', () => ({
   ExportFooter: () => <div data-testid="export-footer">Export Footer</div>,
 }))
 
-import { useChatStore } from '@/features/chat'
-
 describe('ReportTab', () => {
+  beforeEach(() => {
+    mockReportContent = ''
+    mockReportContentCategory = null
+    mockIsStreaming = false
+    mockCurrentStatus = null
+  })
+
   test('displays empty state when no report content', () => {
     render(<ReportTab />)
 
@@ -41,11 +57,7 @@ describe('ReportTab', () => {
   })
 
   test('renders report content via MarkdownRenderer', () => {
-    vi.mocked(useChatStore).mockReturnValue({
-      reportContent: '# Report Title\n\nReport content here',
-      isStreaming: false,
-      currentStatus: null,
-    } as ReturnType<typeof useChatStore>)
+    mockReportContent = '# Report Title\n\nReport content here'
 
     render(<ReportTab />)
 
@@ -53,11 +65,7 @@ describe('ReportTab', () => {
   })
 
   test('renders title when provided', () => {
-    vi.mocked(useChatStore).mockReturnValue({
-      reportContent: 'Some content',
-      isStreaming: false,
-      currentStatus: null,
-    } as ReturnType<typeof useChatStore>)
+    mockReportContent = 'Some content'
 
     render(<ReportTab />)
 
@@ -65,11 +73,9 @@ describe('ReportTab', () => {
   })
 
   test('shows generating indicator when streaming and writing', () => {
-    vi.mocked(useChatStore).mockReturnValue({
-      reportContent: 'Partial content...',
-      isStreaming: true,
-      currentStatus: 'writing',
-    } as ReturnType<typeof useChatStore>)
+    mockReportContent = 'Partial content...'
+    mockIsStreaming = true
+    mockCurrentStatus = 'writing'
 
     render(<ReportTab />)
 

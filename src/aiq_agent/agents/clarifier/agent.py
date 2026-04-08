@@ -105,6 +105,55 @@ JSON_REMINDER_AFTER_TOOLS = (
 """Reminder prompt added after tool results to reinforce JSON-only output."""
 
 
+def _coerce_text_content(content: Any) -> str:
+    """Convert provider-specific content blocks into plain text."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            text_value = None
+            if isinstance(item, dict):
+                text_value = item.get("text")
+                if text_value is None and "content" in item:
+                    nested = _coerce_text_content(item.get("content"))
+                    if nested:
+                        parts.append(nested)
+                    continue
+            else:
+                text_value = getattr(item, "text", None)
+                if text_value is None and hasattr(item, "content"):
+                    nested = _coerce_text_content(getattr(item, "content"))
+                    if nested:
+                        parts.append(nested)
+                    continue
+
+            if isinstance(text_value, str) and text_value.strip():
+                parts.append(text_value)
+
+        if parts:
+            return "\n".join(parts).strip()
+    if isinstance(content, dict):
+        text_value = content.get("text")
+        if isinstance(text_value, str):
+            return text_value
+        if "content" in content:
+            nested = _coerce_text_content(content.get("content"))
+            if nested:
+                return nested
+    if hasattr(content, "text"):
+        text_value = getattr(content, "text")
+        if isinstance(text_value, str):
+            return text_value
+    if hasattr(content, "content"):
+        nested = _coerce_text_content(getattr(content, "content"))
+        if nested:
+            return nested
+    return str(content)
+
+
 class ClarifierAgent:
     """
     Clarifier agent for interactive clarification dialog.
@@ -224,20 +273,21 @@ class ClarifierAgent:
             logger.warning("Plan generation prompt not found, using inline default")
             return DEFAULT_PLAN_GENERATION_PROMPT
 
-    def _parse_plan_response(self, text: str) -> tuple[str | None, list[str]]:
+    def _parse_plan_response(self, text: Any) -> tuple[str | None, list[str]]:
         """
         Parse plan generation response from LLM.
 
         Args:
-            text: Raw JSON text response from the LLM.
+            text: Raw plan response content from the LLM.
 
         Returns:
             Tuple of (title, sections) or (None, []) if parsing fails.
         """
-        if not text:
+        normalized_text = _coerce_text_content(text)
+        if not normalized_text:
             return None, []
 
-        text = text.strip()
+        text = normalized_text.strip()
         json_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
         if json_match:
             text = json_match.group(1).strip()
@@ -306,7 +356,7 @@ class ClarifierAgent:
             f"Reply **approve** to proceed, **reject** to cancel, or provide feedback to revise the plan."
         )
 
-    def _parse_response(self, text: str) -> ClarificationResponse | None:
+    def _parse_response(self, text: Any) -> ClarificationResponse | None:
         """
         Parse JSON response from LLM into ClarificationResponse.
 
@@ -316,15 +366,16 @@ class ClarifierAgent:
         3. Find JSON object pattern anywhere in text
 
         Args:
-            text: Raw text response from LLM.
+            text: Raw response content from the LLM.
 
         Returns:
             ClarificationResponse if parsing succeeds, None otherwise.
         """
-        if not text:
+        normalized_text = _coerce_text_content(text)
+        if not normalized_text:
             return None
 
-        text = text.strip()
+        text = normalized_text.strip()
 
         # Strategy 1: Try parsing the entire text as JSON
         try:
@@ -364,12 +415,12 @@ class ClarifierAgent:
         logger.warning("Failed to parse clarification response as JSON: %s...", text[:200])
         return None
 
-    def _is_needed(self, text: str) -> bool:
+    def _is_needed(self, text: Any) -> bool:
         """
         Check if clarification is needed based on JSON response.
 
         Args:
-            text: Raw JSON text response from the LLM.
+            text: Raw response content from the LLM.
 
         Returns:
             True if clarification is needed or parsing failed, False otherwise.
@@ -380,12 +431,12 @@ class ClarifierAgent:
             return True
         return response.needs_clarification
 
-    def _is_complete(self, text: str) -> bool:
+    def _is_complete(self, text: Any) -> bool:
         """
         Check if clarification is complete based on JSON response.
 
         Args:
-            text: Raw JSON text response from the LLM.
+            text: Raw response content from the LLM.
 
         Returns:
             True if clarification is complete (needs_clarification=false),
@@ -396,7 +447,7 @@ class ClarifierAgent:
             return False
         return response.is_complete()
 
-    def _valid_needed(self, text: str) -> bool:
+    def _valid_needed(self, text: Any) -> bool:
         """
         Check if the clarification response is valid.
 
@@ -405,7 +456,7 @@ class ClarifierAgent:
         - When needs_clarification is true, it contains a clarification question
 
         Args:
-            text: Raw JSON text response from the LLM.
+            text: Raw response content from the LLM.
 
         Returns:
             True if the response is valid, False otherwise.
@@ -415,12 +466,12 @@ class ClarifierAgent:
             return False
         return response.is_valid()
 
-    def _get_clarification_question(self, text: str) -> str:
+    def _get_clarification_question(self, text: Any) -> str:
         """
         Extract the clarification question from the response.
 
         Args:
-            text: Raw text response from LLM.
+            text: Raw response content from the LLM.
 
         Returns:
             The clarification question text.

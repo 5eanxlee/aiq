@@ -11,16 +11,18 @@
 'use client'
 
 import { type FC, useCallback, useMemo } from 'react'
-import { Flex, Text, SidePanel, SegmentedControl, Switch, Button, Banner } from '@/adapters/ui'
+import { Flex, Text, SidePanel, SegmentedControl, Switch, Button, Banner, Badge } from '@/adapters/ui'
 import { Globe, LoadingSpinner } from '@/adapters/ui/icons'
 import { useAuth } from '@/adapters/auth'
 import { useLayoutStore } from '../store'
 import { useIsCurrentSessionBusy, useChatStore } from '@/features/chat'
+import { resolveKnowledgeCollectionName } from '@/features/chat/lib/resolve-knowledge-collection'
 import { type DataSource, WEB_SEARCH_SOURCE_ID } from '../data-sources'
 import { DataConnectionCard } from './DataConnectionCard'
 import { FileSourcesTab } from './FileSourcesTab'
 import { UploadOrchestrator } from '@/features/documents'
 import type { DataSourcesPanelTab } from '../types'
+import { useProjectsStore } from '@/features/projects'
 
 interface DataSourcesPanelProps {
   /** Callback when source enabled state changes */
@@ -35,7 +37,17 @@ interface DataSourcesPanelProps {
  */
 export const DataSourcesPanel: FC<DataSourcesPanelProps> = ({ onSourceToggle, onDeleteFile }) => {
   const { idToken, authRequired } = useAuth()
+  const currentConversation = useChatStore((state) => state.currentConversation)
   const saveDataSourcesToConversation = useChatStore((state) => state.saveDataSourcesToConversation)
+  const currentProject = useProjectsStore((state) => {
+    const targetProjectId = currentConversation
+      ? currentConversation.projectId ?? null
+      : state.currentProjectId
+    if (!targetProjectId) {
+      return null
+    }
+    return state.projects.find((project) => project.id === targetProjectId) ?? null
+  })
 
   const {
     rightPanel,
@@ -56,6 +68,14 @@ export const DataSourcesPanel: FC<DataSourcesPanelProps> = ({ onSourceToggle, on
   const isBusy = useIsCurrentSessionBusy()
 
   const isOpen = rightPanel === 'data-sources'
+  const currentCollectionName = resolveKnowledgeCollectionName(
+    currentConversation,
+    currentProject?.knowledgeCollectionName
+  )
+  const isProjectScope = Boolean(currentProject)
+  const filesFooterCopy = isProjectScope
+    ? 'Files in project memory stay available across sessions in this project until deleted.'
+    : 'Files in this standalone chat stay only in this chat and are not reused by projects or other chats.'
 
   // Check if user has valid auth token
   const hasValidToken = !!idToken
@@ -112,14 +132,14 @@ export const DataSourcesPanel: FC<DataSourcesPanelProps> = ({ onSourceToggle, on
 
       // Refresh files from backend when switching to the files tab
       // to detect backend-side removals (e.g. TTL cleanup)
-      if (value === 'files') {
-        const sessionId = useChatStore.getState().currentConversation?.id
-        if (sessionId) {
-          UploadOrchestrator.refreshFilesForSession(sessionId)
+      if (value === 'files' && currentCollectionName) {
+        const collectionName = currentCollectionName
+        if (collectionName) {
+          UploadOrchestrator.refreshFilesForSession(collectionName)
         }
       }
     },
-    [setDataSourcesPanelTab]
+    [currentCollectionName, setDataSourcesPanelTab]
   )
 
   // Get only sources available to the current auth state
@@ -154,9 +174,21 @@ export const DataSourcesPanel: FC<DataSourcesPanelProps> = ({ onSourceToggle, on
         } as React.CSSProperties
       }
       slotHeading={
-        <Flex align="center" gap="2">
-          <Globe className="h-5 w-5" />
-          Data Sources
+        <Flex direction="col" gap="2" className="min-w-0">
+          <Flex align="center" gap="2">
+            <Globe className="h-5 w-5" />
+            Data Sources
+          </Flex>
+          <Flex align="center" gap="2" className="min-w-0">
+            <Badge color="teal">{isProjectScope ? 'Project Memory' : 'Chat Only'}</Badge>
+            <Text
+              kind="body/regular/xs"
+              className="truncate text-subtle"
+              title={isProjectScope ? currentProject?.title : 'Standalone chat'}
+            >
+              {isProjectScope ? currentProject?.title : 'Standalone chat'}
+            </Text>
+          </Flex>
         </Flex>
       }
       slotFooter={
@@ -167,7 +199,7 @@ export const DataSourcesPanel: FC<DataSourcesPanelProps> = ({ onSourceToggle, on
           </Text>
         ) : (
           <Text kind="body/regular/xs" className="text-subtle text-left">
-            Attached files will be always available to agents until deleted.
+            {filesFooterCopy}
           </Text>
         )
       }

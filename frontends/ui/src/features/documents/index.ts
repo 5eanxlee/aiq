@@ -60,7 +60,7 @@ export {
 } from './constants'
 
 // Components
-export { FileUploadZone } from './components'
+export { ActiveCollectionSync, FileUploadZone } from './components'
 
 // Types
 export type {

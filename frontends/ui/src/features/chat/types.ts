@@ -233,10 +233,16 @@ export interface Conversation {
   id: string
   /** Owner of this session - used to filter sessions by user */
   userId: string
+  /** Parent project for this session */
+  projectId?: string
   title: string
   messages: ChatMessage[]
   createdAt: Date
   updatedAt: Date
+  /** Effective knowledge collection name for this session */
+  knowledgeCollectionName?: string
+  /** Session-specific collection override used for legacy imported sessions */
+  knowledgeCollectionNameOverride?: string | null
   /** Per-session enabled data source IDs (persisted across refresh) */
   enabledDataSourceIds?: string[]
 }
@@ -473,6 +479,14 @@ export interface ChatActions {
   deleteAllConversations: () => void
   /** Update conversation title */
   updateConversationTitle: (conversationId: string, title: string) => void
+  /** Patch a conversation with backend-sourced metadata */
+  patchConversation: (conversationId: string, patch: Partial<Conversation>) => void
+  /** Replace all conversations for the current user from backend state */
+  replaceUserConversations: (
+    userId: string,
+    conversations: Conversation[],
+    currentConversationId?: string | null
+  ) => void
   /** Persist enabled data source IDs to the current conversation for per-session storage */
   saveDataSourcesToConversation: (ids: string[]) => void
 

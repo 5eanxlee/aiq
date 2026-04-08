@@ -54,10 +54,12 @@ from nat.front_ends.fastapi.fastapi_front_end_plugin_worker import FastApiFrontE
 
 from .jobs import EventStore
 from .jobs import get_connection_manager
+from .app_state import AppStateStore
 from .routes.collections import add_collection_routes
 from .routes.documents import add_document_routes
 from .routes.jobs import register_job_routes
 from .routes.providers import register_provider_routes
+from .routes.projects import add_project_routes
 from .websocket_reconnect import install_reconnectable_handler
 
 logger = logging.getLogger(__name__)
@@ -149,8 +151,9 @@ class AIQAPIWorker(FastApiFrontEndPluginWorker):
         knowledge_router = APIRouter()
         add_collection_routes(knowledge_router)
         add_document_routes(knowledge_router)
+        add_project_routes(knowledge_router)
         app.include_router(knowledge_router)
-        logger.info("Knowledge API routes registered")
+        logger.info("Knowledge and project API routes registered")
 
         return app
 
@@ -161,7 +164,7 @@ class AIQAPIWorker(FastApiFrontEndPluginWorker):
         # =====================================================================
         # Provider readiness routes
         # =====================================================================
-        await register_provider_routes(app, builder)
+        await register_provider_routes(app, builder, self)
         logger.info("Provider readiness routes registered")
 
         # =====================================================================
@@ -184,6 +187,7 @@ class AIQAPIWorker(FastApiFrontEndPluginWorker):
             await stop_periodic_cleanup()
 
             await EventStore.dispose_all_engines_async()
+            await AppStateStore.dispose_all_engines_async()
             logger.info("SSE shutdown complete")
 
             self._restore_signal_handlers()

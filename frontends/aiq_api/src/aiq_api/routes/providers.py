@@ -20,15 +20,19 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import shlex
+import subprocess
 import time
 from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
 
 import aiohttp
 from fastapi import FastAPI
+from fastapi import HTTPException
 from pydantic import BaseModel
 from pydantic import Field
 from pydantic import SecretStr
@@ -57,12 +61,38 @@ _WORKER_DISPLAY_NAMES = {
     "shallow_research_agent": "Shallow Research",
     "deep_research_agent": "Deep Research",
 }
+_PROVIDER_DISPLAY_NAMES = {
+    "nvidia": "NVIDIA NIM",
+    "openai": "OpenAI",
+    "tavily": "Tavily",
+    "serper": "Serper",
+    "semantic_scholar": "Semantic Scholar",
+}
 _LLM_ROLE_DISPLAY_NAMES = {
     "llm": "Primary",
     "planner_llm": "Planner",
     "researcher_llm": "Researcher",
     "orchestrator_llm": "Orchestrator",
 }
+
+
+def _discover_project_root() -> Path:
+    current = Path(__file__).resolve()
+    for parent in current.parents:
+        if (parent / "configs").exists() and (parent / "scripts").exists():
+            return parent
+    for parent in current.parents:
+        if (parent / "pyproject.toml").exists():
+            return parent
+    return current.parents[5]
+
+
+_PROJECT_ROOT = _discover_project_root()
+_CONFIGS_DIR = _PROJECT_ROOT / "configs"
+_LOCAL_STACK_STATE_FILE = _PROJECT_ROOT / "var" / "run" / "local-stack.env"
+_LOCAL_STACK_RESTART_SCRIPT = _PROJECT_ROOT / "scripts" / "restart_local_stack.sh"
+_LOCAL_BACKEND_RELOAD_SCRIPT = _PROJECT_ROOT / "scripts" / "restart_local_backend.sh"
+_PRESET_SWITCH_LOG = _PROJECT_ROOT / "var" / "logs" / "preset-switch.log"
 
 
 class ProviderQuotaResponse(BaseModel):
@@ -164,6 +194,65 @@ class ProviderDashboardResponse(BaseModel):
     runtime_window_minutes: int = Field(..., description="Time window used for runtime model observations.")
     providers: list[ProviderStatusResponseItem] = Field(default_factory=list, description="Provider statuses.")
     workers: list[WorkerStatusResponseItem] = Field(default_factory=list, description="Worker model status.")
+    config_presets: list["ConfigPresetResponseItem"] = Field(
+        default_factory=list,
+        description="Available local web configs, including named presets and repo configs.",
+    )
+    config_runtime: "ConfigRuntimeResponse | None" = Field(
+        default=None,
+        description="Current config selection and whether local preset switching is available.",
+    )
+
+
+class ConfigPresetResponseItem(BaseModel):
+    """Available local web config."""
+
+    id: str = Field(..., description="Stable preset identifier.")
+    name: str = Field(..., description="Display name.")
+    config_path: str = Field(..., description="Config path relative to the repo root.")
+    description: str | None = Field(default=None, description="Short preset summary.")
+    kind: str = Field(default="preset", description="Config kind: preset or repo_config.")
+    recommended: bool = Field(default=False, description="Whether this is the recommended preset.")
+    current: bool = Field(default=False, description="Whether this preset is currently active.")
+
+
+class ConfigRuntimeResponse(BaseModel):
+    """Current config runtime state and local-stack control capability."""
+
+    current_config_path: str | None = Field(default=None, description="Active config path relative to the repo root.")
+    current_config_name: str | None = Field(default=None, description="Display name for the active config.")
+    current_preset_id: str | None = Field(default=None, description="Current config identifier when matched.")
+    can_apply_presets: bool = Field(
+        default=False,
+        description="Whether the running backend can reload the local stack into another repo config.",
+    )
+    apply_requires_restart: bool = Field(
+        default=True,
+        description="Selecting a config reloads at least the local backend process.",
+    )
+    local_stack_running: bool = Field(default=False, description="Whether the local stack state file is present.")
+    backend_port: int | None = Field(default=None, description="Backend port for the local stack.")
+    frontend_port: int | None = Field(default=None, description="Frontend port for the local stack.")
+    next_port: int | None = Field(default=None, description="Internal Next.js port for the local stack.")
+
+
+class ApplyConfigPresetRequest(BaseModel):
+    """Request body for applying a local config."""
+
+    config_path: str = Field(..., description="Config path relative to the repo root.")
+
+
+class ApplyConfigPresetResponse(BaseModel):
+    """Response returned when a config change is scheduled."""
+
+    accepted: bool = Field(..., description="Whether the preset switch was scheduled.")
+    message: str = Field(..., description="Human-readable result.")
+    config_path: str = Field(..., description="Config path that will be applied.")
+    backend_url: str | None = Field(default=None, description="Backend URL after restart, when known.")
+    frontend_url: str | None = Field(default=None, description="Frontend URL after restart, when known.")
+
+
+ProviderDashboardResponse.model_rebuild()
 
 
 @dataclass
@@ -186,6 +275,265 @@ def _provider_env_keys(provider_id: str) -> tuple[str, ...]:
     if provider_id == "semantic_scholar":
         return ("SEMANTIC_SCHOLAR_API_KEY",)
     return ()
+
+
+def _normalize_repo_path(path_value: str | None) -> str | None:
+    if not path_value:
+        return None
+
+    candidate = Path(path_value)
+    if not candidate.is_absolute():
+        candidate = (_PROJECT_ROOT / candidate).resolve()
+    else:
+        candidate = candidate.resolve()
+
+    try:
+        return candidate.relative_to(_PROJECT_ROOT).as_posix()
+    except ValueError:
+        return candidate.as_posix()
+
+
+def _read_local_stack_state() -> dict[str, str]:
+    if not _LOCAL_STACK_STATE_FILE.exists():
+        return {}
+
+    values: dict[str, str] = {}
+    for raw_line in _LOCAL_STACK_STATE_FILE.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key.strip()] = value.strip()
+    return values
+
+
+def _coerce_port(value: str | None) -> int | None:
+    if not value:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+def _config_supports_front_end(config_path: Path) -> bool:
+    try:
+        for raw_line in config_path.read_text(encoding="utf-8").splitlines():
+            if raw_line.strip().startswith("front_end:"):
+                return True
+    except OSError:
+        return False
+    return False
+
+
+def _extract_preset_metadata(config_path: Path, current_config_path: str | None) -> ConfigPresetResponseItem:
+    lines = config_path.read_text(encoding="utf-8").splitlines()[:16]
+    relative_path = config_path.relative_to(_PROJECT_ROOT).as_posix()
+    preset_id = config_path.stem.removeprefix("config_")
+    is_preset = config_path.name.startswith("config_preset_")
+
+    name = _format_config_path_name(relative_path)
+    description_parts: list[str] = []
+    fallback_comment: str | None = None
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line.startswith("#"):
+            continue
+        if line.startswith("# Preset:"):
+            name = line.split(":", 1)[1].strip()
+            continue
+        if line.startswith("# Characteristics:") or line.startswith("# Intended use:") or line.startswith("# Notes:"):
+            continue
+        if line.startswith("# - "):
+            description_parts.append(line[4:].strip())
+            continue
+
+        comment = line.removeprefix("#").strip()
+        if comment and fallback_comment is None:
+            fallback_comment = comment
+
+    return ConfigPresetResponseItem(
+        id=preset_id,
+        name=name,
+        config_path=relative_path,
+        description=" ".join(description_parts[:2]) or fallback_comment,
+        kind="preset" if is_preset else "repo_config",
+        recommended=config_path.name == "config_preset_max_quality.yml",
+        current=relative_path == current_config_path,
+    )
+
+
+def _list_config_presets(current_config_path: str | None) -> list[ConfigPresetResponseItem]:
+    if not _CONFIGS_DIR.exists():
+        return []
+
+    presets = [
+        _extract_preset_metadata(path, current_config_path)
+        for path in sorted(_CONFIGS_DIR.glob("config_*.yml"))
+        if _config_supports_front_end(path)
+    ]
+    presets.sort(
+        key=lambda preset: (
+            not preset.current,
+            not preset.recommended,
+            preset.kind != "preset",
+            preset.name.lower(),
+        )
+    )
+    return presets
+
+
+def _format_config_path_name(current_config_path: str) -> str:
+    filename = Path(current_config_path).name
+    if filename.startswith("nat_config") and filename.endswith((".yml", ".yaml")):
+        return "Generated runtime config"
+
+    stem = Path(current_config_path).stem
+    if stem.startswith("config_preset_"):
+        stem = stem.removeprefix("config_preset_")
+    elif stem.startswith("config_"):
+        stem = stem.removeprefix("config_")
+
+    replacements = {
+        "api": "API",
+        "frag": "FRAG",
+        "gpt": "GPT",
+        "llamaindex": "LlamaIndex",
+        "ui": "UI",
+    }
+
+    words = []
+    for part in stem.split("_"):
+        if not part:
+            continue
+        lower = part.lower()
+        words.append(replacements.get(lower, part.capitalize()))
+
+    return " ".join(words) if words else filename
+
+
+def _current_config_name(current_config_path: str | None, presets: list[ConfigPresetResponseItem]) -> str | None:
+    if not current_config_path:
+        return None
+
+    for preset in presets:
+        if preset.config_path == current_config_path:
+            return preset.name
+
+    return _format_config_path_name(current_config_path)
+
+
+def _build_config_runtime(
+    current_config_path: str | None,
+    presets: list[ConfigPresetResponseItem],
+) -> ConfigRuntimeResponse:
+    local_stack_state = _read_local_stack_state()
+    state_config_path = _normalize_repo_path(local_stack_state.get("CONFIG_FILE"))
+    local_stack_running = bool(local_stack_state)
+    can_apply_presets = bool(
+        local_stack_running and (_LOCAL_BACKEND_RELOAD_SCRIPT.exists() or _LOCAL_STACK_RESTART_SCRIPT.exists())
+    )
+    effective_current_path = current_config_path
+    if not effective_current_path or not effective_current_path.startswith("configs/"):
+        effective_current_path = state_config_path or effective_current_path
+    current_preset = next((preset for preset in presets if preset.config_path == effective_current_path), None)
+
+    return ConfigRuntimeResponse(
+        current_config_path=effective_current_path,
+        current_config_name=_current_config_name(effective_current_path, presets),
+        current_preset_id=current_preset.id if current_preset else None,
+        can_apply_presets=can_apply_presets,
+        apply_requires_restart=True,
+        local_stack_running=local_stack_running,
+        backend_port=_coerce_port(local_stack_state.get("BACKEND_PORT")),
+        frontend_port=_coerce_port(local_stack_state.get("FRONTEND_PORT")),
+        next_port=_coerce_port(local_stack_state.get("NEXT_PORT")),
+    )
+
+
+def _resolve_preset_config(config_path: str) -> str:
+    normalized_path = _normalize_repo_path(config_path)
+    if not normalized_path:
+        raise HTTPException(status_code=400, detail="Config path is required.")
+
+    candidate = (_PROJECT_ROOT / normalized_path).resolve()
+    try:
+        candidate.relative_to(_CONFIGS_DIR)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Config path must live under the repo configs directory.") from exc
+
+    if not candidate.exists() or candidate.suffix not in {".yml", ".yaml"} or not candidate.name.startswith("config_"):
+        raise HTTPException(status_code=400, detail="Unknown config path.")
+    if not _config_supports_front_end(candidate):
+        raise HTTPException(
+            status_code=400,
+            detail="That config cannot be applied to the local web stack because it does not define front_end.",
+        )
+
+    return normalized_path
+
+
+def _schedule_preset_restart(config_path: str) -> ApplyConfigPresetResponse:
+    state = _read_local_stack_state()
+    if not state:
+        raise HTTPException(
+            status_code=409,
+            detail="Preset switching is only available when the app was started via ./scripts/start_local_stack.sh.",
+        )
+    if not _LOCAL_BACKEND_RELOAD_SCRIPT.exists() and not _LOCAL_STACK_RESTART_SCRIPT.exists():
+        raise HTTPException(status_code=500, detail="Local restart helpers are not available.")
+
+    backend_port = _coerce_port(state.get("BACKEND_PORT")) or 8000
+    frontend_port = _coerce_port(state.get("FRONTEND_PORT")) or 3005
+    next_port = _coerce_port(state.get("NEXT_PORT")) or 3201
+    current_config_path = _normalize_repo_path(state.get("CONFIG_FILE"))
+
+    if current_config_path == config_path:
+        return ApplyConfigPresetResponse(
+            accepted=True,
+            message="That config is already active for the local stack.",
+            config_path=config_path,
+            backend_url=f"http://localhost:{backend_port}",
+            frontend_url=f"http://localhost:{frontend_port}",
+        )
+
+    _PRESET_SWITCH_LOG.parent.mkdir(parents=True, exist_ok=True)
+    if _LOCAL_BACKEND_RELOAD_SCRIPT.exists():
+        restart_cmd = (
+            f"sleep 1; cd {shlex.quote(str(_PROJECT_ROOT))}; "
+            f"exec {shlex.quote(str(_LOCAL_BACKEND_RELOAD_SCRIPT))} "
+            f"--config_file {shlex.quote(config_path)} "
+            f"--backend_port {backend_port}"
+        )
+        message = "Config switch scheduled. The local backend will reload shortly."
+    else:
+        restart_cmd = (
+            f"sleep 1; cd {shlex.quote(str(_PROJECT_ROOT))}; "
+            f"exec {shlex.quote(str(_LOCAL_STACK_RESTART_SCRIPT))} "
+            f"--config_file {shlex.quote(config_path)} "
+            f"--backend_port {backend_port} "
+            f"--frontend_port {frontend_port} "
+            f"--next_port {next_port}"
+        )
+        message = "Config switch scheduled. The local backend and frontend will restart shortly."
+
+    with _PRESET_SWITCH_LOG.open("ab") as log_file:
+        subprocess.Popen(
+            ["/bin/bash", "-lc", restart_cmd],
+            cwd=_PROJECT_ROOT,
+            start_new_session=True,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+        )
+
+    return ApplyConfigPresetResponse(
+        accepted=True,
+        message=message,
+        config_path=config_path,
+        backend_url=f"http://localhost:{backend_port}",
+        frontend_url=f"http://localhost:{frontend_port}",
+    )
 
 
 def _empty_provider(provider_id: str, name: str, kind: str) -> dict[str, Any]:
@@ -807,6 +1155,36 @@ async def _probe_nvidia(api_key: str) -> ProviderProbeResult:
     )
 
 
+def _probe_failure_result(provider_id: str, detail: str) -> ProviderProbeResult:
+    provider_name = _PROVIDER_DISPLAY_NAMES.get(provider_id, provider_id.replace("_", " ").title())
+    message = f"{provider_name} connectivity probe failed: {detail}"
+    return ProviderProbeResult(
+        connected=False,
+        detail=message,
+        quota=ProviderQuotaResponse(
+            supported=False,
+            message=message,
+        ),
+    )
+
+
+def _coerce_probe_result(provider_id: str, result: ProviderProbeResult | BaseException | Any) -> ProviderProbeResult:
+    if isinstance(result, ProviderProbeResult):
+        return result
+
+    if isinstance(result, BaseException):
+        logger.error(
+            "Provider probe escaped for %s",
+            provider_id,
+            exc_info=(type(result), result, result.__traceback__),
+        )
+        error_detail = str(result).strip() or result.__class__.__name__
+        return _probe_failure_result(provider_id, error_detail)
+
+    logger.error("Provider probe returned unexpected result for %s: %r", provider_id, result)
+    return _probe_failure_result(provider_id, f"unexpected probe result: {type(result).__name__}")
+
+
 async def _probe_with_cache(provider_id: str, api_key: str | None, probe_fn: Any) -> ProviderProbeResult:
     cache_key = (provider_id, hash(api_key or ""))
     cached = _PROBE_CACHE.get(cache_key)
@@ -814,7 +1192,16 @@ async def _probe_with_cache(provider_id: str, api_key: str | None, probe_fn: Any
     if cached and now - cached[0] < _PROBE_CACHE_TTL_SECONDS:
         return cached[1]
 
-    result = await probe_fn(api_key)
+    try:
+        result = await probe_fn(api_key)
+    except asyncio.TimeoutError:
+        logger.warning("Provider probe timed out for %s", provider_id, exc_info=True)
+        result = _probe_failure_result(provider_id, f"timed out after {_PROBE_TIMEOUT_SECONDS} seconds.")
+    except Exception as exc:
+        logger.exception("Provider probe failed for %s", provider_id)
+        error_detail = str(exc).strip() or exc.__class__.__name__
+        result = _probe_failure_result(provider_id, error_detail)
+
     async with _PROBE_CACHE_LOCK:
         _PROBE_CACHE[cache_key] = (time.monotonic(), result)
     return result
@@ -950,7 +1337,7 @@ def _compute_missing_requirements(providers: list[ProviderStatusResponseItem]) -
     return missing
 
 
-async def register_provider_routes(app: FastAPI, builder: WorkflowBuilder) -> None:
+async def register_provider_routes(app: FastAPI, builder: WorkflowBuilder, worker: Any | None = None) -> None:
     """Register provider readiness routes."""
 
     @app.get(
@@ -962,6 +1349,10 @@ async def register_provider_routes(app: FastAPI, builder: WorkflowBuilder) -> No
     async def get_provider_status() -> ProviderDashboardResponse:
         from aiq_agent.common import get_runtime_model_activity
 
+        current_config_path = _normalize_repo_path(
+            (getattr(worker, "_config_file_path", None) if worker is not None else None)
+            or os.environ.get("NAT_CONFIG_FILE")
+        )
         provider_map = _collect_provider_usage(builder)
         worker_configs = _collect_worker_usage(builder)
         runtime_observations = get_runtime_model_activity(window_seconds=_RUNTIME_ACTIVITY_WINDOW_SECONDS)
@@ -980,20 +1371,25 @@ async def register_provider_routes(app: FastAPI, builder: WorkflowBuilder) -> No
         ]
 
         probe_results = await asyncio.gather(
-            *[_probe_provider(provider_id, provider_map[provider_id]) for provider_id in visible_provider_ids]
+            *[_probe_provider(provider_id, provider_map[provider_id]) for provider_id in visible_provider_ids],
+            return_exceptions=True,
         )
 
         providers = [
             _build_provider_status(
                 provider_id,
                 provider_map[provider_id],
-                probe,
+                _coerce_probe_result(provider_id, probe),
                 runtime_calls=runtime_by_provider.get(provider_id, []),
             )
             for provider_id, probe in zip(visible_provider_ids, probe_results, strict=False)
         ]
         providers.sort(key=lambda provider: (not provider.active, provider.kind, provider.name))
         workers = _build_worker_statuses(worker_configs, runtime_observations)
+        presets = _list_config_presets(current_config_path=None)
+        config_runtime = _build_config_runtime(current_config_path, presets)
+        presets = _list_config_presets(config_runtime.current_config_path)
+        config_runtime = _build_config_runtime(current_config_path, presets)
 
         missing_requirements = _compute_missing_requirements(providers)
 
@@ -1004,6 +1400,18 @@ async def register_provider_routes(app: FastAPI, builder: WorkflowBuilder) -> No
             runtime_window_minutes=_RUNTIME_ACTIVITY_WINDOW_SECONDS // 60,
             providers=providers,
             workers=workers,
+            config_presets=presets,
+            config_runtime=config_runtime,
         )
+
+    @app.post(
+        "/v1/providers/presets/apply",
+        response_model=ApplyConfigPresetResponse,
+        tags=["providers"],
+        summary="Apply a local config and reload the local stack",
+    )
+    async def apply_config_preset(request: ApplyConfigPresetRequest) -> ApplyConfigPresetResponse:
+        config_path = _resolve_preset_config(request.config_path)
+        return _schedule_preset_restart(config_path)
 
     logger.info("Registered /v1/providers/status route")

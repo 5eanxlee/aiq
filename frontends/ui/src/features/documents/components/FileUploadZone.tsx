@@ -29,8 +29,10 @@ interface UploadedFile {
 }
 
 interface FileUploadZoneProps {
-  /** Session ID for filtering displayed files */
+  /** Legacy alias for collectionName */
   sessionId?: string
+  /** Collection name for filtering displayed files */
+  collectionName?: string
   /** Max file size in bytes (for display only) */
   maxFileSize?: number
   /** Accepted file types (MIME types or extensions) */
@@ -49,6 +51,7 @@ interface FileUploadZoneProps {
 
 export const FileUploadZone: FC<FileUploadZoneProps> = ({
   sessionId,
+  collectionName,
   maxFileSize = MAX_FILE_SIZE,
   acceptedTypes = ACCEPTED_FILE_TYPES,
   onUpload,
@@ -57,12 +60,16 @@ export const FileUploadZone: FC<FileUploadZoneProps> = ({
 }) => {
   // Check if current session is busy with operations
   const isBusy = useIsCurrentSessionBusy()
+  const resolvedCollectionName = collectionName ?? sessionId
 
   // Get files for current session
   const trackedFiles = useDocumentsStore((state) => state.trackedFiles)
   const sessionFiles = useMemo(
-    () => (sessionId ? trackedFiles.filter((f) => f.collectionName === sessionId) : []),
-    [trackedFiles, sessionId]
+    () =>
+      resolvedCollectionName
+        ? trackedFiles.filter((f) => f.collectionName === resolvedCollectionName)
+        : [],
+    [trackedFiles, resolvedCollectionName]
   )
 
   // Map sessionFiles to KUI Upload value format

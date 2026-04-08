@@ -14,10 +14,12 @@ import {
   CollectionListResponseSchema,
   FileInfoSchema,
   FileListResponseSchema,
+  FilePreviewSchema,
   UploadResponseSchema,
   IngestionJobStatusSchema,
   type CollectionInfo,
   type FileInfo,
+  type FilePreview,
   type IngestionJobStatus,
 } from './documents-schemas'
 
@@ -47,6 +49,12 @@ export interface UploadFilesOptions {
   signal?: AbortSignal
 }
 
+export interface DownloadedDocument {
+  blob: Blob
+  fileName: string | null
+  contentType: string | null
+}
+
 // ============================================================================
 // Helpers
 // ============================================================================
@@ -57,6 +65,24 @@ export interface UploadFilesOptions {
 async function handleApiError(response: Response, context: string): Promise<never> {
   const error = await response.json().catch(() => ({}))
   throw new Error(error?.error?.message || `${context}: ${response.statusText}`)
+}
+
+function parseFilenameFromContentDisposition(contentDisposition: string | null): string | null {
+  if (!contentDisposition) {
+    return null
+  }
+
+  const encodedMatch = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)
+  if (encodedMatch?.[1]) {
+    try {
+      return decodeURIComponent(encodedMatch[1].replace(/^"|"$/g, ''))
+    } catch {
+      return encodedMatch[1].replace(/^"|"$/g, '')
+    }
+  }
+
+  const plainMatch = contentDisposition.match(/filename="?([^";]+)"?/i)
+  return plainMatch?.[1] ?? null
 }
 
 // ============================================================================
@@ -317,6 +343,63 @@ export const createDocumentsClient = (options: DocumentsClientOptions = {}) => {
 
       if (!response.ok && response.status !== 404) {
         await handleApiError(response, 'Failed to delete files')
+      }
+    },
+
+    /**
+     * Fetch preview metadata for a file in a collection
+     */
+    async getFilePreview(
+      collectionName: string,
+      fileId: string,
+      signal?: AbortSignal
+    ): Promise<FilePreview> {
+      const encodedCollection = encodeURIComponent(collectionName)
+      const encodedFileId = encodeURIComponent(fileId)
+      const response = await fetch(
+        `${getDocumentsBaseUrl()}/collections/${encodedCollection}/documents/${encodedFileId}/preview`,
+        {
+          method: 'GET',
+          headers: getHeaders(),
+          signal,
+        }
+      )
+
+      if (!response.ok) {
+        await handleApiError(response, 'Failed to load file preview')
+      }
+
+      const data = await response.json()
+      return FilePreviewSchema.parse(data)
+    },
+
+    /**
+     * Download the original file from a collection.
+     */
+    async downloadFile(
+      collectionName: string,
+      fileId: string,
+      signal?: AbortSignal
+    ): Promise<DownloadedDocument> {
+      const encodedCollection = encodeURIComponent(collectionName)
+      const encodedFileId = encodeURIComponent(fileId)
+      const response = await fetch(
+        `${getDocumentsBaseUrl()}/collections/${encodedCollection}/documents/${encodedFileId}/download`,
+        {
+          method: 'GET',
+          headers: getHeaders(false),
+          signal,
+        }
+      )
+
+      if (!response.ok) {
+        await handleApiError(response, 'Failed to download file')
+      }
+
+      return {
+        blob: await response.blob(),
+        fileName: parseFilenameFromContentDisposition(response.headers.get('content-disposition')),
+        contentType: response.headers.get('content-type'),
       }
     },
 

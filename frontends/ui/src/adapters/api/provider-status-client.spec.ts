@@ -30,6 +30,8 @@ describe('createProviderStatusClient', () => {
       runtime_window_minutes: 360,
       providers: [],
       workers: [],
+      config_presets: [],
+      config_runtime: null,
     }
 
     mockFetch.mockResolvedValue({
@@ -59,6 +61,8 @@ describe('createProviderStatusClient', () => {
           runtime_window_minutes: 360,
           providers: [],
           workers: [],
+          config_presets: [],
+          config_runtime: null,
         }),
     })
 
@@ -89,5 +93,117 @@ describe('createProviderStatusClient', () => {
     await expect(client.getProviderStatus()).rejects.toThrow(
       'Provider dashboard is unavailable on the running backend. Restart or rebuild the backend so it serves /v1/providers/status.'
     )
+  })
+
+  test('applies a config preset successfully', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          accepted: true,
+          message: 'Preset switch scheduled.',
+          config_path: 'configs/config_preset_max_quality.yml',
+          backend_url: 'http://localhost:8001',
+          frontend_url: 'http://localhost:3005',
+          operation_id: 'reload-op-1',
+        }),
+    })
+
+    const client = createProviderStatusClient()
+    const result = await client.applyConfigPreset('configs/config_preset_max_quality.yml')
+
+    expect(result.accepted).toBe(true)
+    expect(mockFetch).toHaveBeenCalledWith('/api/local-stack/config-reload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config_path: 'configs/config_preset_max_quality.yml' }),
+      signal: undefined,
+    })
+  })
+
+  test('reads local config reload status successfully', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          operation_id: 'reload-op-1',
+          state: 'starting',
+          message: 'Starting backend.',
+          config_path: 'configs/config_preset_max_quality.yml',
+        }),
+    })
+
+    const client = createProviderStatusClient()
+    const result = await client.getLocalConfigReloadStatus()
+
+    expect(result.state).toBe('starting')
+    expect(mockFetch).toHaveBeenCalledWith('/api/local-stack/config-reload', {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+      signal: undefined,
+    })
+  })
+
+  test('reads local research options successfully', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          supported: true,
+          local_stack_running: true,
+          can_edit: true,
+          requires_reload: true,
+          config_path: 'configs/config_preset_current_setup.yml',
+          generated_config_path: 'configs/generated/config_runtime_config_preset_current_setup.yml',
+          knowledge_layer_enabled: true,
+          generate_summary: true,
+          top_k: 9,
+          notes: ['Top K applies after reload.'],
+        }),
+    })
+
+    const client = createProviderStatusClient()
+    const result = await client.getLocalResearchOptions()
+
+    expect(result.top_k).toBe(9)
+    expect(mockFetch).toHaveBeenCalledWith('/api/local-stack/research-options', {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+      signal: undefined,
+    })
+  })
+
+  test('applies local research options successfully', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          accepted: true,
+          message: 'Research option changes scheduled.',
+          config_path: 'configs/generated/config_runtime_config_preset_current_setup.yml',
+          backend_url: 'http://localhost:8000',
+          frontend_url: 'http://localhost:3005',
+          operation_id: 'reload-op-2',
+        }),
+    })
+
+    const client = createProviderStatusClient()
+    const result = await client.applyLocalResearchOptions({
+      knowledge_layer_enabled: true,
+      generate_summary: false,
+      top_k: 7,
+    })
+
+    expect(result.accepted).toBe(true)
+    expect(mockFetch).toHaveBeenCalledWith('/api/local-stack/research-options', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        knowledge_layer_enabled: true,
+        generate_summary: false,
+        top_k: 7,
+      }),
+      signal: undefined,
+    })
   })
 })

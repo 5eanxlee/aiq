@@ -35,6 +35,10 @@ export interface FileSourceCardProps {
   errorMessage?: string
   /** Hours after upload before the file may expire (0 = no expiry shown) */
   expirationIntervalHours?: number
+  /** Callback when view is clicked */
+  onView?: () => void
+  /** Disable preview action */
+  viewDisabled?: boolean
   /** Callback when delete is clicked */
   onDelete: (id: string) => void
 }
@@ -163,6 +167,8 @@ export const FileSourceCard: FC<FileSourceCardProps> = ({
   status,
   errorMessage,
   expirationIntervalHours = 0,
+  onView,
+  viewDisabled = false,
   onDelete,
 }) => {
   const config = STATUS_CONFIG[status]
@@ -176,6 +182,8 @@ export const FileSourceCard: FC<FileSourceCardProps> = ({
   const isProcessing = status === 'uploading' || status === 'ingesting'
   const isDeleting = status === 'deleting'
   const deleteDisabled = isBusy || isProcessing || isDeleting
+  const canView = !!onView
+  const previewDisabled = viewDisabled || isDeleting
 
   return (
     <Flex
@@ -266,25 +274,43 @@ export const FileSourceCard: FC<FileSourceCardProps> = ({
           )}
         </Flex>
 
-        {/* Delete button */}
-        <Button
-          kind="tertiary"
-          size="small"
-          color="danger"
-          onClick={handleDelete}
-          disabled={deleteDisabled}
-          aria-label={deleteDisabled ? `Delete ${title} (disabled)` : `Delete ${title}`}
-          title={
-            isProcessing
-              ? 'Wait for upload to complete'
-              : deleteDisabled
-                ? 'Cannot delete files during active operations'
-                : 'Delete file'
-          }
-          className="ml-2 flex-shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
-        >
-          <Trash width={16} height={16} className="text-subtle hover:text-error" />
-        </Button>
+        <Flex direction="col" gap="2" className="ml-3 shrink-0">
+          {canView && (
+            <Button
+              kind="secondary"
+              size="small"
+              onClick={onView}
+              disabled={previewDisabled}
+              aria-label={previewDisabled ? `View ${title} (disabled)` : `View ${title}`}
+              title={
+                previewDisabled
+                  ? 'Preview is unavailable while this file is being processed'
+                  : 'View file details'
+              }
+            >
+              View
+            </Button>
+          )}
+
+          <Button
+            kind="tertiary"
+            size="small"
+            color="danger"
+            onClick={handleDelete}
+            disabled={deleteDisabled}
+            aria-label={deleteDisabled ? `Delete ${title} (disabled)` : `Delete ${title}`}
+            title={
+              isProcessing
+                ? 'Wait for upload to complete'
+                : deleteDisabled
+                  ? 'Cannot delete files during active operations'
+                  : 'Delete file'
+            }
+            className="flex-shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+          >
+            <Trash width={16} height={16} className="text-subtle hover:text-error" />
+          </Button>
+        </Flex>
       </Flex>
     </Flex>
   )

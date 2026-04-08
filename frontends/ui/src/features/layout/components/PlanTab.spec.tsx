@@ -10,13 +10,17 @@ import type { PlanMessage } from '@/features/chat/types'
 let mockPlanMessages: PlanMessage[] = []
 let mockIsStreaming = false
 let mockIsLoading = false
+const getMockState = () => ({
+  planMessages: mockPlanMessages,
+  isStreaming: mockIsStreaming,
+  isLoading: mockIsLoading,
+})
 
 vi.mock('@/features/chat', () => ({
-  useChatStore: () => ({
-    planMessages: mockPlanMessages,
-    isStreaming: mockIsStreaming,
-    isLoading: mockIsLoading,
-  }),
+  useChatStore: (selector?: (state: ReturnType<typeof getMockState>) => unknown) => {
+    const state = getMockState()
+    return selector ? selector(state) : state
+  },
 }))
 
 // Mock MarkdownRenderer

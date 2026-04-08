@@ -15,16 +15,21 @@ These presets are additive. They do not replace the shipped configs or the curre
   - Keeps Nemotron Nano on the researcher side.
 
 - `config_preset_frontier_gpt54_xhigh_super.yml`
-  - Same frontier planner/orchestrator split, but upgrades the research workers to Nemotron Super.
+  - Same frontier planner/orchestrator split, but upgrades the research workers to `nvidia/llama-3.3-nemotron-super-49b-v1.5`.
 
 - `config_preset_nvidia_super_only.yml`
   - Best quality path without direct OpenAI routing.
-  - Uses Nemotron Super for clarifier, shallow research, and deep research.
+  - Uses `nvidia/llama-3.3-nemotron-super-49b-v1.5` for clarifier, shallow research, and deep research.
 
 - `config_preset_max_quality.yml`
   - Highest-quality preset on the current branch.
-  - Uses GPT-5.4 pro for clarification/planning/orchestration and Nemotron Super for research work.
+  - Uses GPT-5.4 with `xhigh` reasoning for clarification/planning/orchestration and `nvidia/llama-3.1-nemotron-ultra-253b-v1` for research work.
   - Assumes you accept higher latency and cost.
+
+- `config_preset_max_quality_gpt54_medium.yml`
+  - Same max-quality stack, but lowers GPT-5.4 to `reasoning_effort: medium`.
+  - Keeps `nvidia/llama-3.1-nemotron-ultra-253b-v1` for research work.
+  - Useful when you want the max-quality topology with a slightly cheaper/faster planner/orchestrator.
 
 ## Common Requirements
 

@@ -9,7 +9,7 @@
  */
 
 // Configuration
-export { apiConfig, getWebSocketUrl } from './config'
+export { apiConfig, getWebSocketUrl, checkBackendHealth } from './config'
 
 // Chat Client (SSE Streaming)
 export { streamGenerate } from './chat-client'
@@ -62,6 +62,7 @@ export { createDocumentsClient } from './documents-client'
 export type {
   DocumentsClient,
   DocumentsClientOptions,
+  DownloadedDocument,
   UploadFilesOptions,
 } from './documents-client'
 
@@ -74,11 +75,34 @@ export type {
   DataSourcesResponse,
 } from './data-sources-client'
 
+// Projects Client
+export { createProjectsClient } from './projects-client'
+export type {
+  ProjectsClient,
+  ProjectsClientOptions,
+  CreateProjectPayload,
+  UpdateProjectPayload,
+  CreateSessionPayload,
+  UpdateSessionPayload,
+  PutSessionSnapshotPayload,
+  CreateProjectArtifactPayload,
+  ProjectFromAPI,
+  SessionFromAPI,
+  SessionSnapshotFromAPI,
+  ProjectArtifactFromAPI,
+} from './projects-client'
+
 // Provider Status Client
 export { createProviderStatusClient } from './provider-status-client'
 export type {
+  ApplyLocalResearchOptionsResponseFromAPI,
   ProviderStatusClient,
   ProviderStatusClientOptions,
+  ApplyConfigPresetResponseFromAPI,
+  ConfigPresetFromAPI,
+  ConfigRuntimeFromAPI,
+  LocalResearchOptionsFromAPI,
+  LocalConfigReloadStatusFromAPI,
   ProviderDashboardFromAPI,
   ProviderStatusFromAPI,
   ProviderQuotaFromAPI,
@@ -93,6 +117,7 @@ export {
   JobStateSchema,
   CollectionInfoSchema,
   FileInfoSchema,
+  FilePreviewSchema,
   FileProgressSchema,
   IngestionJobStatusSchema,
 } from './documents-schemas'
@@ -102,6 +127,7 @@ export type {
   JobState,
   CollectionInfo,
   FileInfo,
+  FilePreview,
   FileProgress,
   IngestionJobStatus,
 } from './documents-schemas'

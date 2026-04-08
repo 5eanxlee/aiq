@@ -1184,7 +1184,9 @@ class LlamaIndexIngestor(TTLCleanupMixin, BaseIngestor):
                     # Create new FileInfo from chunk metadata
                     result.append(
                         FileInfo(
-                            file_id=file_id or str(uuid.uuid4()),
+                            # Fall back to the filename so persisted files remain
+                            # addressable across server restarts.
+                            file_id=file_id or file_name,
                             file_name=file_name,
                             collection_name=collection_name,
                             status=FileStatus.SUCCESS,

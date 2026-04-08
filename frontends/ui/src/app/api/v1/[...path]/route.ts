@@ -29,6 +29,40 @@ const buildBackendUrl = (req: NextRequest, path: string[]): string => {
   return `${backendBase}/v1/${pathString}`
 }
 
+const isJsonResponse = (contentType: string | null): boolean =>
+  Boolean(contentType && contentType.toLowerCase().includes('application/json'))
+
+const buildBackendErrorResponse = (status: number, errorText: string): NextResponse =>
+  new NextResponse(
+    JSON.stringify({
+      error: { code: 'BACKEND_ERROR', message: `Backend returned ${status}: ${errorText}` },
+    }),
+    { status, headers: { 'Content-Type': 'application/json' } }
+  )
+
+const buildPassthroughHeaders = (response: Response): Headers => {
+  const headers = new Headers()
+  const contentType = response.headers.get('content-type')
+  const contentDisposition = response.headers.get('content-disposition')
+  const contentLength = response.headers.get('content-length')
+  const cacheControl = response.headers.get('cache-control')
+
+  if (contentType) {
+    headers.set('content-type', contentType)
+  }
+  if (contentDisposition) {
+    headers.set('content-disposition', contentDisposition)
+  }
+  if (contentLength) {
+    headers.set('content-length', contentLength)
+  }
+  if (cacheControl) {
+    headers.set('cache-control', cacheControl)
+  }
+
+  return headers
+}
+
 const getAuthHeaders = async (req: NextRequest): Promise<Record<string, string>> => {
   // Skip auth when REQUIRE_AUTH=false - don't forward any auth info to backend
   if (!isAuthRequired()) {
@@ -58,22 +92,26 @@ export async function GET(
       method: 'GET',
       headers: {
         ...authHeaders,
-        Accept: 'application/json',
+        Accept: req.headers.get('accept') || '*/*',
       },
     })
 
     if (!response.ok) {
       const errorText = await response.text()
-      return new NextResponse(
-        JSON.stringify({
-          error: { code: 'BACKEND_ERROR', message: `Backend returned ${response.status}: ${errorText}` },
-        }),
-        { status: response.status, headers: { 'Content-Type': 'application/json' } }
-      )
+      return buildBackendErrorResponse(response.status, errorText)
     }
 
-    const data = await response.json()
-    return NextResponse.json(data)
+    const contentType = response.headers.get('content-type')
+    if (isJsonResponse(contentType)) {
+      const data = await response.json()
+      return NextResponse.json(data)
+    }
+
+    const body = await response.arrayBuffer()
+    return new NextResponse(body, {
+      status: response.status,
+      headers: buildPassthroughHeaders(response),
+    })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
     return new NextResponse(
@@ -118,12 +156,7 @@ export async function POST(
 
     if (!response.ok) {
       const errorText = await response.text()
-      return new NextResponse(
-        JSON.stringify({
-          error: { code: 'BACKEND_ERROR', message: `Backend returned ${response.status}: ${errorText}` },
-        }),
-        { status: response.status, headers: { 'Content-Type': 'application/json' } }
-      )
+      return buildBackendErrorResponse(response.status, errorText)
     }
 
     const data = await response.json()
@@ -135,6 +168,72 @@ export async function POST(
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     )
   }
+}
+
+async function forwardJsonMethod(
+  method: 'PUT' | 'PATCH',
+  req: NextRequest,
+  { params }: { params: Promise<{ path: string[] }> }
+): Promise<Response> {
+  try {
+    const { path } = await params
+    const backendUrl = buildBackendUrl(req, path)
+    const authHeaders = await getAuthHeaders(req)
+
+    let body: string | undefined
+    try {
+      const json = await req.json()
+      body = JSON.stringify(json)
+    } catch {
+      body = undefined
+    }
+
+    const response = await fetch(backendUrl, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders,
+      },
+      ...(body ? { body } : {}),
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      return new NextResponse(
+        JSON.stringify({
+          error: { code: 'BACKEND_ERROR', message: `Backend returned ${response.status}: ${errorText}` },
+        }),
+        { status: response.status, headers: { 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (response.status === 204) {
+      return new NextResponse(null, { status: 204 })
+    }
+
+    const data = await response.json()
+    return NextResponse.json(data, { status: response.status })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error'
+    return new NextResponse(
+      JSON.stringify({ error: { code: 'PROXY_ERROR', message } }),
+      { status: 500, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
+}
+
+export async function PUT(
+  req: NextRequest,
+  context: { params: Promise<{ path: string[] }> }
+): Promise<Response> {
+  return forwardJsonMethod('PUT', req, context)
+}
+
+export async function PATCH(
+  req: NextRequest,
+  context: { params: Promise<{ path: string[] }> }
+): Promise<Response> {
+  return forwardJsonMethod('PATCH', req, context)
 }
 
 export async function DELETE(

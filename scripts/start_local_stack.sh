@@ -145,11 +145,16 @@ wait_for_url() {
     local url="$1"
     local label="$2"
     local max_attempts="$3"
+    local watch_pid="${4:-}"
     local attempt=1
 
     while [ "$attempt" -le "$max_attempts" ]; do
         if curl -s -f "$url" >/dev/null 2>&1; then
             return 0
+        fi
+        if [ -n "$watch_pid" ] && ! kill -0 "$watch_pid" 2>/dev/null; then
+            echo "$label exited before becoming ready."
+            return 1
         fi
         sleep 1
         attempt=$((attempt + 1))
@@ -374,7 +379,7 @@ nohup bash -lc "cd '$PROJECT_ROOT' && exec ./scripts/start_server_in_debug_mode.
 BACKEND_PID=$!
 echo "$BACKEND_PID" > "$BACKEND_PID_FILE"
 
-if ! wait_for_url "http://localhost:${BACKEND_PORT}/health" "Backend" 120; then
+if ! wait_for_url "http://localhost:${BACKEND_PORT}/health" "Backend" 120 "$BACKEND_PID"; then
     echo "Backend failed to start. Recent log output:"
     tail -n 40 "$BACKEND_LOG" || true
     cleanup_on_error
@@ -390,7 +395,7 @@ nohup env \
 FRONTEND_PID=$!
 echo "$FRONTEND_PID" > "$FRONTEND_PID_FILE"
 
-if ! wait_for_url "http://localhost:${FRONTEND_PORT}" "Frontend" 120; then
+if ! wait_for_url "http://localhost:${FRONTEND_PORT}" "Frontend" 120 "$FRONTEND_PID"; then
     echo "Frontend failed to start. Recent log output:"
     tail -n 60 "$FRONTEND_LOG" || true
     cleanup_on_error

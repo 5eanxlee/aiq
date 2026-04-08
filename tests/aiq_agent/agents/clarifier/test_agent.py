@@ -219,6 +219,22 @@ class TestClarifierAgentParsing:
         assert result is not None
         assert result.needs_clarification is False
 
+    def test_parse_response_with_openai_content_blocks(self, agent):
+        """Test parsing Responses API content blocks from frontier models."""
+        text = [
+            {"id": "rs_123", "summary": [], "type": "reasoning"},
+            {
+                "id": "msg_123",
+                "type": "text",
+                "text": '{"needs_clarification": false, "clarification_question": null}',
+                "annotations": [],
+            },
+        ]
+        result = agent._parse_response(text)
+
+        assert result is not None
+        assert result.needs_clarification is False
+
     def test_parse_response_invalid_json(self, agent):
         """Test parsing invalid JSON returns None."""
         result = agent._parse_response("not valid json")
@@ -477,6 +493,22 @@ class TestClarifierAgentPlanParsing:
     def test_parse_plan_response_with_code_block(self, agent):
         """Test parsing plan JSON wrapped in code block."""
         text = '```json\n{"title": "Research Plan", "sections": ["Overview", "Analysis"]}\n```'
+        title, sections = agent._parse_plan_response(text)
+
+        assert title == "Research Plan"
+        assert sections == ["Overview", "Analysis"]
+
+    def test_parse_plan_response_with_openai_content_blocks(self, agent):
+        """Test parsing plan JSON from Responses API content blocks."""
+        text = [
+            {"id": "rs_123", "summary": [], "type": "reasoning"},
+            {
+                "id": "msg_123",
+                "type": "text",
+                "text": '{"title": "Research Plan", "sections": ["Overview", "Analysis"]}',
+                "annotations": [],
+            },
+        ]
         title, sections = agent._parse_plan_response(text)
 
         assert title == "Research Plan"

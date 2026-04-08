@@ -4,10 +4,10 @@
 /**
  * useSessionUrl Hook
  *
- * Syncs the current session/conversation with the URL query parameter.
- * - On mount, reads ?session=xxx from URL and selects that conversation
- * - Provides updateSessionUrl to update URL when session changes
- * - Handles invalid/missing session IDs gracefully
+ * Syncs the current project/session selection with the URL query parameters.
+ * - On mount, reads ?project=xxx&session=yyy from the URL and restores state
+ * - Provides updateRouteUrl to update URL when project or session changes
+ * - Handles invalid/missing project or session IDs gracefully
  */
 
 'use client'
@@ -15,6 +15,7 @@
 import { useEffect, useCallback, useRef } from 'react'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { useChatStore } from '@/features/chat'
+import { useProjectsStore } from '@/features/projects'
 
 interface UseSessionUrlOptions {
   /** Whether the user is authenticated (sessions only work when authenticated) */
@@ -22,8 +23,8 @@ interface UseSessionUrlOptions {
 }
 
 interface UseSessionUrlReturn {
-  /** Update URL to reflect the given session ID */
-  updateSessionUrl: (sessionId: string | null) => void
+  /** Update URL to reflect the given project/session IDs */
+  updateRouteUrl: (projectId: string | null, sessionId?: string | null) => void
   /** Clear session from URL (navigate to root) */
   clearSessionUrl: () => void
 }
@@ -37,8 +38,11 @@ export function useSessionUrl({ isAuthenticated }: UseSessionUrlOptions): UseSes
   const pathname = usePathname() ?? '/'
   const searchParams = useSearchParams()
 
-  const { currentConversation, currentUserId, selectConversation, getUserConversations } =
-    useChatStore()
+  const { currentConversation, currentUserId, selectConversation, getUserConversations } = useChatStore()
+  const currentProjectId = useProjectsStore((state) => state.currentProjectId)
+  const setCurrentProjectId = useProjectsStore((state) => state.setCurrentProjectId)
+  const projects = useProjectsStore((state) => state.projects)
+  const projectsHydrated = useProjectsStore((state) => state.isHydrated)
 
   // Track if we've done the initial URL sync to avoid duplicate effects
   const initialSyncDone = useRef(false)
@@ -46,25 +50,36 @@ export function useSessionUrl({ isAuthenticated }: UseSessionUrlOptions): UseSes
   // Read session from URL on mount and select it
   // Wait for both isAuthenticated AND currentUserId to be set (user ID is synced by chat hooks)
   useEffect(() => {
-    if (!isAuthenticated || !currentUserId || !searchParams || initialSyncDone.current) return
+    if (
+      !isAuthenticated ||
+      !currentUserId ||
+      !searchParams ||
+      !projectsHydrated ||
+      initialSyncDone.current
+    ) {
+      return
+    }
 
     const sessionId = searchParams.get('session')
-    if (!sessionId) {
+    const projectId = searchParams.get('project')
+
+    if (!sessionId && !projectId) {
       initialSyncDone.current = true
       return
     }
 
-    // Check if this session exists for the current user
     const userConversations = getUserConversations()
-    const sessionExists = userConversations.some((c) => c.id === sessionId)
+    const session = sessionId ? userConversations.find((conversation) => conversation.id === sessionId) : null
+    const projectExists = projectId ? projects.some((project) => project.id === projectId) : false
 
-    if (sessionExists) {
-      // Select the session from URL
-      selectConversation(sessionId)
+    if (session) {
+      selectConversation(session.id)
+    } else if (projectId && projectExists) {
+      setCurrentProjectId(projectId)
     } else {
-      // Invalid session ID - clear it from URL
       const newParams = new URLSearchParams(searchParams.toString())
       newParams.delete('session')
+      newParams.delete('project')
       const newUrl = newParams.toString() ? `${pathname}?${newParams.toString()}` : pathname
       router.replace(newUrl)
     }
@@ -75,8 +90,11 @@ export function useSessionUrl({ isAuthenticated }: UseSessionUrlOptions): UseSes
     currentUserId,
     searchParams,
     pathname,
+    projectsHydrated,
+    projects,
     router,
     selectConversation,
+    setCurrentProjectId,
     getUserConversations,
   ])
 
@@ -85,27 +103,51 @@ export function useSessionUrl({ isAuthenticated }: UseSessionUrlOptions): UseSes
     if (!isAuthenticated || !currentUserId || !searchParams || !initialSyncDone.current) return
 
     const urlSessionId = searchParams.get('session')
-    const currentSessionId = currentConversation?.id
+    const urlProjectId = searchParams.get('project')
+    const currentSessionId = currentConversation?.id ?? null
+    const effectiveProjectId = currentConversation
+      ? currentConversation.projectId ?? null
+      : currentProjectId ?? null
 
-    // Only update if they're different
-    if (currentSessionId && currentSessionId !== urlSessionId) {
+    if (
+      currentSessionId !== urlSessionId ||
+      effectiveProjectId !== urlProjectId
+    ) {
       const newParams = new URLSearchParams(searchParams.toString())
-      newParams.set('session', currentSessionId)
-      router.replace(`${pathname}?${newParams.toString()}`)
-    } else if (!currentSessionId && urlSessionId) {
-      // No current session but URL has one - clear it
-      const newParams = new URLSearchParams(searchParams.toString())
-      newParams.delete('session')
+      if (effectiveProjectId) {
+        newParams.set('project', effectiveProjectId)
+      } else {
+        newParams.delete('project')
+      }
+      if (currentSessionId) {
+        newParams.set('session', currentSessionId)
+      } else {
+        newParams.delete('session')
+      }
       const newUrl = newParams.toString() ? `${pathname}?${newParams.toString()}` : pathname
       router.replace(newUrl)
     }
-  }, [isAuthenticated, currentUserId, currentConversation?.id, searchParams, pathname, router])
+  }, [
+    isAuthenticated,
+    currentUserId,
+    currentConversation?.id,
+    currentConversation?.projectId,
+    currentProjectId,
+    searchParams,
+    pathname,
+    router,
+  ])
 
-  // Manual URL update function
-  const updateSessionUrl = useCallback(
-    (sessionId: string | null) => {
+  const updateRouteUrl = useCallback(
+    (projectId: string | null, sessionId?: string | null) => {
       const currentParams = searchParams?.toString() ?? ''
       const newParams = new URLSearchParams(currentParams)
+
+      if (projectId) {
+        newParams.set('project', projectId)
+      } else {
+        newParams.delete('project')
+      }
 
       if (sessionId) {
         newParams.set('session', sessionId)
@@ -120,11 +162,11 @@ export function useSessionUrl({ isAuthenticated }: UseSessionUrlOptions): UseSes
   )
 
   const clearSessionUrl = useCallback(() => {
-    updateSessionUrl(null)
-  }, [updateSessionUrl])
+    updateRouteUrl(null, null)
+  }, [updateRouteUrl])
 
   return {
-    updateSessionUrl,
+    updateRouteUrl,
     clearSessionUrl,
   }
 }

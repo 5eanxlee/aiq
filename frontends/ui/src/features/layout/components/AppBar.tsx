@@ -15,14 +15,19 @@
 
 'use client'
 
-import { type FC, useCallback, useState } from 'react'
-import { Flex, Text, Button, Logo, Avatar, Popover, Divider } from '@/adapters/ui'
-import { Menu, Globe, Settings, Book, Lock, Logout, ChevronRight, Info } from '@/adapters/ui/icons'
+import { type FC, useCallback, useMemo, useState } from 'react'
+import { Flex, Text, Button, Logo, Avatar, Popover, Divider, Badge, SegmentedControl } from '@/adapters/ui'
+import { Menu, Globe, Settings, Book, Lock, Logout, ChevronRight, Info, ChartFlow, Sun, Moon } from '@/adapters/ui/icons'
 import { useLayoutStore } from '../store'
+import type { ThemeMode } from '../types'
 
 interface AppBarProps {
+  /** Current project title to display */
+  projectTitle?: string
   /** Current session title to display */
   sessionTitle?: string
+  /** Whether the active chat is outside any project */
+  isStandaloneScope?: boolean
   /** Whether the user is authenticated */
   isAuthenticated?: boolean
   /** Whether authentication is required (false = using default user) */
@@ -43,12 +48,44 @@ interface AppBarProps {
   onSignOut?: () => void
 }
 
+const ThemeSelectorContent = ({
+  theme,
+  onThemeChange,
+}: {
+  theme: ThemeMode
+  onThemeChange: (value: string) => void
+}) => (
+  <Flex direction="col" gap="3" className="min-w-[220px] p-3">
+    <div>
+      <Text kind="label/semibold/xs" className="text-subtle uppercase tracking-[0.08em]">
+        Theme
+      </Text>
+      <Text kind="body/regular/xs" className="mt-1 block text-subtle">
+        Update the app appearance immediately.
+      </Text>
+    </div>
+    <SegmentedControl
+      value={theme}
+      onValueChange={onThemeChange}
+      size="small"
+      className="w-full"
+      items={[
+        { value: 'light', children: 'Light' },
+        { value: 'dark', children: 'Dark' },
+        { value: 'system', children: 'System' },
+      ]}
+    />
+  </Flex>
+)
+
 /**
  * Main navigation bar at the top of the application.
  * Controls sidebar toggles and navigation actions.
  */
 export const AppBar: FC<AppBarProps> = ({
+  projectTitle,
   sessionTitle = 'New Session',
+  isStandaloneScope = false,
   isAuthenticated = false,
   authRequired = false,
   user,
@@ -57,8 +94,9 @@ export const AppBar: FC<AppBarProps> = ({
   onSignIn,
   onSignOut,
 }) => {
-  const { toggleSessionsPanel, rightPanel, openRightPanel, closeRightPanel } = useLayoutStore()
+  const { toggleSessionsPanel, rightPanel, openRightPanel, closeRightPanel, theme, setTheme } = useLayoutStore()
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
+  const [isThemeMenuOpen, setIsThemeMenuOpen] = useState(false)
 
   const handleMenuClick = useCallback(() => {
     if (!isAuthenticated) return
@@ -83,9 +121,26 @@ export const AppBar: FC<AppBarProps> = ({
     }
   }, [rightPanel, openRightPanel, closeRightPanel, isAuthenticated])
 
+  const handleProvidersClick = useCallback(() => {
+    if (!isAuthenticated) return
+    if (rightPanel === 'providers') {
+      closeRightPanel()
+    } else {
+      openRightPanel('providers')
+    }
+  }, [rightPanel, openRightPanel, closeRightPanel, isAuthenticated])
+
   const handleDocsClick = useCallback(() => {
     window.open('https://github.com/NVIDIA-AI-Blueprints/aiq', '_blank')
   }, [])
+
+  const handleThemeChange = useCallback(
+    (value: string) => {
+      setTheme(value as ThemeMode)
+      setIsThemeMenuOpen(false)
+    },
+    [setTheme]
+  )
 
   const handleNewSessionClick = useCallback(() => {
     if (!isAuthenticated || isNewSessionDisabled) return
@@ -97,6 +152,19 @@ export const AppBar: FC<AppBarProps> = ({
     onSignOut?.()
   }, [onSignOut])
 
+  const ThemeIcon = useMemo(() => {
+    if (theme === 'dark') {
+      return Moon
+    }
+    return Sun
+  }, [theme])
+
+  const scopeBadgeLabel = isStandaloneScope ? 'Standalone' : 'Project'
+  const scopeTitle = isStandaloneScope ? 'Standalone Chat' : projectTitle ?? 'General'
+  const scopeSubtitle = isStandaloneScope
+    ? `Chat: ${sessionTitle} | No shared project files`
+    : `Session: ${sessionTitle}`
+
   return (
     <header className="border-b border-base">
       <Flex align="center" justify="between" className="h-[var(--header-height)] gap-4 px-4">
@@ -107,11 +175,11 @@ export const AppBar: FC<AppBarProps> = ({
             size="small"
             onClick={handleNewSessionClick}
             disabled={!isAuthenticated || isNewSessionDisabled}
-            aria-label="Create new session"
+            aria-label="Create new standalone chat"
             title={
               isNewSessionDisabled
-                ? 'Cannot create new session while shallow research is active'
-                : 'Create new session'
+                ? 'Cannot create new standalone chat while shallow research is active'
+                : 'Create new standalone chat with no shared project files'
             }
           >
             <Flex align="center" gap="density-lg">
@@ -138,19 +206,51 @@ export const AppBar: FC<AppBarProps> = ({
           </Button>
 
           {isAuthenticated && (
-            <div className="ml-4 hidden min-w-0 flex-1 items-center md:flex">
+            <Flex direction="col" gap="1" className="ml-4 hidden min-w-0 flex-1 md:flex">
+              <Flex align="center" gap="2" className="min-w-0">
+                <Badge color="teal">{scopeBadgeLabel}</Badge>
+                <Text
+                  kind="label/semibold/sm"
+                  className="block max-w-[320px] truncate text-primary lg:max-w-[420px] xl:max-w-[520px]"
+                  title={scopeTitle}
+                >
+                  {scopeTitle}
+                </Text>
+              </Flex>
+
               <Text
-                kind="body/regular/md"
+                kind="body/regular/sm"
                 className="block w-full max-w-[360px] truncate text-subtle lg:max-w-[480px] xl:max-w-[560px]"
+                title={scopeSubtitle}
               >
-                {sessionTitle}
+                {scopeSubtitle}
               </Text>
-            </div>
+            </Flex>
           )}
         </Flex>
 
         {/* Right section: Actions + User */}
         <Flex align="center" gap="2" className="shrink-0">
+          <Popover
+            open={isThemeMenuOpen}
+            onOpenChange={setIsThemeMenuOpen}
+            side="bottom"
+            align="end"
+            slotContent={<ThemeSelectorContent theme={theme} onThemeChange={handleThemeChange} />}
+          >
+            <Button
+              kind="tertiary"
+              size="small"
+              aria-label="Open theme selector"
+              title="Open theme selector"
+            >
+              <Flex align="center" gap="1">
+                <ThemeIcon className="h-4 w-4" />
+                <Text kind="label/regular/md">Theme</Text>
+              </Flex>
+            </Button>
+          </Popover>
+
           <Button
             kind="tertiary"
             size="small"
@@ -168,14 +268,28 @@ export const AppBar: FC<AppBarProps> = ({
           <Button
             kind="tertiary"
             size="small"
+            onClick={handleProvidersClick}
+            disabled={!isAuthenticated}
+            aria-label="Open research providers"
+            title="Open research providers"
+          >
+            <Flex align="center" gap="1">
+              <ChartFlow className="h-4 w-4" />
+              <Text kind="label/regular/md">Providers</Text>
+            </Flex>
+          </Button>
+
+          <Button
+            kind="tertiary"
+            size="small"
             onClick={handleSettingsClick}
             disabled={!isAuthenticated}
-            aria-label="Open settings"
-            title="Open settings"
+            aria-label="Open config"
+            title="Open config"
           >
             <Flex align="center" gap="1">
               <Settings className="h-4 w-4" />
-              <Text kind="label/regular/md">Settings</Text>
+              <Text kind="label/regular/md">Config</Text>
             </Flex>
           </Button>
 

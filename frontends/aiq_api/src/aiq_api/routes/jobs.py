@@ -84,6 +84,14 @@ class JobSubmitRequest(BaseModel):
         le=604800,
         description="Job expiry in seconds (default from config, max 7 days)",
     )
+    session_id: str | None = Field(
+        None,
+        description="Optional session/conversation ID to bind the job to a persisted session/project.",
+    )
+    data_sources: list[str] | None = Field(
+        default=None,
+        description="Optional enabled data source IDs to enforce for this job.",
+    )
 
 
 class JobStatusResponse(BaseModel):
@@ -194,6 +202,41 @@ def _calculate_elapsed_seconds(job: object) -> float | None:
     try:
         return max((updated_at - created_at).total_seconds(), 0.0)
     except TypeError:
+        return None
+
+
+async def _resolve_session_collection_name(session_id: str | None) -> str | None:
+    if not session_id:
+        return None
+
+    try:
+        from aiq_api.app_state import get_app_state_store
+
+        collection_name = await get_app_state_store().get_effective_collection_name(session_id)
+        if collection_name:
+            return collection_name
+    except Exception as exc:
+        logger.debug("Async jobs route falling back to legacy collection for %s: %s", session_id, exc)
+
+    return session_id
+
+
+async def _load_available_documents_for_session(session_id: str | None) -> list[dict] | None:
+    if not session_id:
+        return None
+
+    try:
+        from aiq_agent.knowledge import get_available_documents_async
+
+        collection_name = await _resolve_session_collection_name(session_id)
+        if not collection_name:
+            return None
+        documents = await get_available_documents_async(collection_name)
+        if not documents:
+            return None
+        return [doc.model_dump() for doc in documents]
+    except Exception as exc:
+        logger.warning("Failed to load available documents for async job session %s: %s", session_id, exc)
         return None
 
 
@@ -361,6 +404,8 @@ async def register_job_routes(app: FastAPI, builder: WorkflowBuilder, worker: Fa
         resolved_job_id = job_store.ensure_job_id(req.job_id)
         expiry = req.expiry_seconds if req.expiry_seconds is not None else default_expiry_seconds
 
+        available_documents = await _load_available_documents_for_session(req.session_id)
+
         job_args = [
             not use_threads,  # configure_logging
             log_level,
@@ -376,9 +421,9 @@ async def register_job_routes(app: FastAPI, builder: WorkflowBuilder, worker: Fa
             None,  # parent_function_name
             None,  # parent_workflow_run_id
             None,  # parent_workflow_trace_id
-            None,  # parent_conversation_id
-            None,  # available_documents
-            None,  # data_sources
+            req.session_id,  # parent_conversation_id
+            available_documents,
+            req.data_sources,
         ]
 
         job_id, _ = await job_store.submit_job(
