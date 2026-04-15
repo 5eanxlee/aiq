@@ -19,6 +19,8 @@ const mockGetProviderStatus = vi.fn().mockResolvedValue({
 const mockApplyConfigPreset = vi.fn()
 const mockGetLocalResearchOptions = vi.fn()
 const mockApplyLocalResearchOptions = vi.fn()
+const mockGetLocalTavilyApiKeyStatus = vi.fn()
+const mockUpdateLocalTavilyApiKey = vi.fn()
 const mockGetLocalConfigReloadStatus = vi.fn().mockResolvedValue({
   operation_id: 'reload-op-1',
   state: 'ready',
@@ -40,6 +42,8 @@ vi.mock('@/adapters/api', () => ({
     applyConfigPreset: mockApplyConfigPreset,
     getLocalResearchOptions: mockGetLocalResearchOptions,
     applyLocalResearchOptions: mockApplyLocalResearchOptions,
+    getLocalTavilyApiKeyStatus: mockGetLocalTavilyApiKeyStatus,
+    updateLocalTavilyApiKey: mockUpdateLocalTavilyApiKey,
     getLocalConfigReloadStatus: mockGetLocalConfigReloadStatus,
   })),
 }))
@@ -82,12 +86,25 @@ describe('SettingsPanel', () => {
       knowledge_layer_enabled: false,
       generate_summary: false,
       top_k: 5,
+      min_total_sources_retrieved: 0,
+      min_total_cited_sources: 0,
       notes: [
         'Top K applies to future retrieval calls after the backend reloads.',
         'Generate Summary affects newly uploaded or re-ingested files. Existing files keep their current summary state.',
       ],
     })
     mockApplyLocalResearchOptions.mockReset()
+    mockGetLocalTavilyApiKeyStatus.mockReset()
+    mockGetLocalTavilyApiKeyStatus.mockResolvedValue({
+      local_stack_running: true,
+      can_edit: true,
+      requires_reload: true,
+      env_path: 'deploy/.env',
+      configured: true,
+      key_hint: '••••abcd',
+      notes: ['Saving a new Tavily key reloads the local backend.'],
+    })
+    mockUpdateLocalTavilyApiKey.mockReset()
     mockGetLocalConfigReloadStatus.mockReset()
     mockGetLocalConfigReloadStatus.mockResolvedValue({
       operation_id: 'reload-op-1',
@@ -206,6 +223,8 @@ describe('SettingsPanel', () => {
       knowledge_layer_enabled: false,
       generate_summary: false,
       top_k: 5,
+      min_total_sources_retrieved: 0,
+      min_total_cited_sources: 0,
       notes: [
         'Top K applies to future retrieval calls after the backend reloads.',
         'Generate Summary affects newly uploaded or re-ingested files. Existing files keep their current summary state.',
@@ -228,6 +247,8 @@ describe('SettingsPanel', () => {
         knowledge_layer_enabled: true,
         generate_summary: true,
         top_k: 9,
+        min_total_sources_retrieved: 120,
+        min_total_cited_sources: 12,
         notes: [
           'Top K applies to future retrieval calls after the backend reloads.',
           'Generate Summary affects newly uploaded or re-ingested files. Existing files keep their current summary state.',
@@ -239,10 +260,12 @@ describe('SettingsPanel', () => {
 
     await user.click(screen.getByText('Options'))
 
-    expect(await screen.findByText('Knowledge Retrieval Options')).toBeInTheDocument()
+    expect(await screen.findByText('Research Runtime Options')).toBeInTheDocument()
     expect(screen.getByText('Knowledge Layer')).toBeInTheDocument()
     expect(screen.getByText('Generate Summary')).toBeInTheDocument()
     expect(screen.getByText('Top K')).toBeInTheDocument()
+    expect(screen.getByText('Minimum Total Sources Retrieved')).toBeInTheDocument()
+    expect(screen.getByText('Minimum Total Cited Sources')).toBeInTheDocument()
 
     await user.click(screen.getByRole('switch', { name: /toggle knowledge layer/i }))
     await user.click(screen.getByRole('switch', { name: /toggle generate summary/i }))
@@ -251,13 +274,57 @@ describe('SettingsPanel', () => {
     await user.clear(topKInput)
     await user.type(topKInput, '9')
 
+    const minRetrievedInput = screen.getByLabelText(/minimum total sources retrieved/i)
+    await user.clear(minRetrievedInput)
+    await user.type(minRetrievedInput, '120')
+
+    const minCitedInput = screen.getByLabelText(/minimum total cited sources/i)
+    await user.clear(minCitedInput)
+    await user.type(minCitedInput, '12')
+
     await user.click(screen.getByRole('button', { name: /save research options/i }))
 
     expect(mockApplyLocalResearchOptions).toHaveBeenCalledWith({
       knowledge_layer_enabled: true,
       generate_summary: true,
       top_k: 9,
+      min_total_sources_retrieved: 120,
+      min_total_cited_sources: 12,
     })
+  })
+
+  test('updates the Tavily API key from the options tab', async () => {
+    const user = userEvent.setup()
+
+    mockUpdateLocalTavilyApiKey.mockResolvedValue({
+      accepted: true,
+      message: 'Tavily API key saved.',
+      config_path: 'configs/config_preset_current_setup.yml',
+      backend_url: 'http://localhost:8000',
+      frontend_url: 'http://localhost:3005',
+      operation_id: null,
+      status: {
+        local_stack_running: true,
+        can_edit: true,
+        requires_reload: true,
+        env_path: 'deploy/.env',
+        configured: true,
+        key_hint: '••••wxyz',
+        notes: ['Saving a new Tavily key reloads the local backend.'],
+      },
+    })
+
+    render(<SettingsPanel />)
+
+    await user.click(screen.getByText('Options'))
+
+    expect(await screen.findByText('Tavily Search Key')).toBeInTheDocument()
+
+    const tavilyInput = screen.getByPlaceholderText(/replacement tavily api key/i)
+    await user.type(tavilyInput, 'tvly-new-key')
+    await user.click(screen.getByRole('button', { name: /save tavily api key/i }))
+
+    expect(mockUpdateLocalTavilyApiKey).toHaveBeenCalledWith({ api_key: 'tvly-new-key' })
   })
 
   test('renders generated runtime configs with a friendly current-config label', async () => {
@@ -296,5 +363,53 @@ describe('SettingsPanel', () => {
 
     expect(await screen.findByText('Generated Runtime Config')).toBeInTheDocument()
     expect(screen.getByText('/tmp/nat_configdfpqk2r.yml')).toBeInTheDocument()
+  })
+
+  test('keeps the source preset selected when the backend runs a generated runtime config', async () => {
+    mockGetProviderStatus.mockResolvedValue({
+      generated_at: '2026-04-07T01:00:00Z',
+      can_run_research: true,
+      missing_requirements: [],
+      runtime_window_minutes: 360,
+      providers: [],
+      workers: [],
+      config_presets: [
+        {
+          id: 'preset_web_default_llamaindex',
+          name: 'balanced web default',
+          config_path: 'configs/config_web_default_llamaindex.yml',
+          description: 'Balanced default.',
+          kind: 'repo_config',
+          recommended: false,
+          current: false,
+        },
+        {
+          id: 'preset_max_quality',
+          name: 'maximum quality / unconstrained latency and cost',
+          config_path: 'configs/config_preset_max_quality.yml',
+          description: 'Highest-quality configuration that still fits the current AI-Q architecture.',
+          kind: 'preset',
+          recommended: true,
+          current: true,
+        },
+      ],
+      config_runtime: {
+        current_config_path: 'configs/generated/config_runtime_config_preset_max_quality.yml',
+        current_config_name: 'maximum quality / unconstrained latency and cost',
+        current_preset_id: 'preset_max_quality',
+        can_apply_presets: true,
+        apply_requires_restart: true,
+        local_stack_running: true,
+        backend_port: 8000,
+        frontend_port: 3005,
+        next_port: 3201,
+      },
+    })
+
+    render(<SettingsPanel />)
+
+    expect(await screen.findAllByText('Maximum Quality')).not.toHaveLength(0)
+    expect(screen.getByText('Runtime File')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /apply selected configuration/i })).toHaveTextContent('Already Running')
   })
 })

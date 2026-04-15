@@ -75,8 +75,20 @@ class UploadOrchestratorImpl {
    */
   async handleSessionChange(newSessionId: string | undefined): Promise<void> {
     const previousSessionId = this.currentSessionId
+    const store = this.getStore()
 
     if (newSessionId === previousSessionId) {
+      const needsHydration =
+        !!newSessionId &&
+        store.loadedSessionId !== newSessionId &&
+        !store.isLoadingFiles &&
+        !store.isUploading &&
+        !store.isPolling
+
+      if (needsHydration) {
+        this.lastLoadedSessionId = null
+        await this.loadFilesForSession(newSessionId)
+      }
       return
     }
 
@@ -84,11 +96,11 @@ class UploadOrchestratorImpl {
     this.stopPolling()
 
     // Clear any upload error from previous session
-    this.getStore().clearError()
+    store.clearError()
 
     // Clear files for old session
     if (previousSessionId) {
-      this.getStore().clearFilesForCollection(previousSessionId)
+      store.clearFilesForCollection(previousSessionId)
     }
 
     // Update session ID immediately to prevent race conditions
@@ -98,7 +110,7 @@ class UploadOrchestratorImpl {
     // Signal loading immediately so the UI shows a spinner before any async work.
     // loadFilesForSession (or early returns below) will clear this.
     if (newSessionId && (sessionHasKnownCollection(newSessionId) || isProjectCollectionName(newSessionId))) {
-      this.getStore().setLoadingFiles(true)
+      store.setLoadingFiles(true)
     }
 
     // Check for persisted job to resume

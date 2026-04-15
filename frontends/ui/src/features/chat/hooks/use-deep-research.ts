@@ -28,6 +28,7 @@ import {
   isLikelyAuthRelatedTransportError,
   isDeepResearchReplayCompleteMode,
 } from '../lib/transport-auth-signals'
+import { mergeDeepResearchCitations } from '../lib/citation-formatting'
 
 /** Timeout in milliseconds before showing a warning (60 seconds) */
 const TIMEOUT_WARNING_MS = 60000
@@ -227,7 +228,14 @@ export const useDeepResearch = (): UseDeepResearchReturn => {
           }
         >(),
         todos: null as TodoItem[] | null,
-        citations: [] as Array<{ url: string; content: string; isCited: boolean }>,
+        citations: [] as Array<{
+          url: string
+          content: string
+          isCited: boolean
+          title?: string
+          domain?: string
+          displayLabel?: string
+        }>,
         files: new Map<string, string>(),
         reportContent: null as string | null,
       }
@@ -271,12 +279,15 @@ export const useDeepResearch = (): UseDeepResearchReturn => {
           status: 'complete' as const,
           timestamp: now,
         }))
-        const citations = buf.citations.map((c, i) => ({
+        const citations = mergeDeepResearchCitations(buf.citations, buf.reportContent ?? '').map((c, i) => ({
           id: `citation-${i}`,
           url: c.url,
           content: c.content,
           isCited: c.isCited,
           timestamp: now,
+          title: c.title,
+          domain: c.domain,
+          displayLabel: c.displayLabel,
         }))
         const files = Array.from(buf.files.entries()).map(([filename, content], i) => ({
           id: `file-${i}`,
@@ -650,14 +661,21 @@ export const useDeepResearch = (): UseDeepResearchReturn => {
             setDeepResearchTodos(todos)
           },
 
-          onCitationUpdate: (url, content, isCited) => {
+          onCitationUpdate: (url, content, isCited, metadata) => {
             if (buf.active) {
-              buf.citations.push({ url, content, isCited: isCited ?? false })
+              buf.citations.push({
+                url,
+                content,
+                isCited: isCited ?? false,
+                title: metadata?.title,
+                domain: metadata?.domain,
+                displayLabel: metadata?.displayLabel,
+              })
               return
             }
             if (!isOwnerActive()) return
             resetTimeout()
-            addDeepResearchCitation(url, content, isCited)
+            addDeepResearchCitation(url, content, isCited, metadata)
           },
 
           onFileUpdate: (filename, content) => {

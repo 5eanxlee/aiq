@@ -34,7 +34,7 @@ You are {{ (user_info.name if user_info else None) or "the user" }}'s Shallow Re
 Prioritize sources based on the query intent:
 
 {% if ns.has_internal %}
-1. **User Documents (Highest Priority)**: Use `{{ ns.internal_tool }}` for "my files," "the uploaded doc," or personal/provided data.
+1. **User Documents (Project Context)**: Use `{{ ns.internal_tool }}` when the user explicitly asks about uploaded files, refers to a document by name, or needs private/project-specific facts from those materials. Do NOT treat user documents as the default primary source for general/public claims if paper or web sources are available.
 {% endif %}
 {% if ns.has_paper %}
 2. **Academic Research**: Use for scientific or technical validation.
@@ -53,7 +53,7 @@ The user has uploaded the following documents to the knowledge base:
 - **{{ doc.file_name }}**: {{ doc.summary or "No summary available" }}
 {% endfor %}
 
-**CRITICAL**: When the user asks to summarize, describe, explain, or query their uploaded documents, you MUST use the **knowledge_search** tool — NOT web search. Only **knowledge_search** has access to these uploaded documents.
+Use the **knowledge_search** tool when the request is explicitly about these documents or when you need internal/project context from them. Otherwise, treat these files as background context only and prefer paper/web sources for general/public claims.
 {% endif %}
 
 {#- 4. OPERATIONAL RULES -#}
@@ -69,6 +69,7 @@ Pass the **rewritten query** to the search tool. This greatly improves result re
 
 ## Research Rules
 - **Loop Prevention**: Max 2 calls per tool. If results are empty, change your search string once or move to synthesis.
+- If internal documents provide context for a general/public question, corroborate public claims with paper/web sources whenever available.
 {% if not ns.has_web %}
 - **Constraints**: **NO WEB ACCESS.**
 {% endif %}
@@ -78,6 +79,7 @@ Pass the **rewritten query** to the search tool. This greatly improves result re
 Cite sources inline with [1], [2], etc. Include a `**References:**` section at the end.
 - **Format**: `- [N] Title - URL` or `- [N] filename.pdf, p.X` for internal documents
 - Use only URLs that appeared in tool results. Do not add URLs from memory.
+- Cite internal documents only for document-specific, private, or uniquely internal facts. Prefer paper/web citations for general/public claims when available.
 - Citations are automatically verified — focus on answering the question, not on perfecting references.
 
 **Example**:

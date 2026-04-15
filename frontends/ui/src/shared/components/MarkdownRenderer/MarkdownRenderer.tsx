@@ -156,7 +156,12 @@ export const MarkdownRenderer: FC<MarkdownRendererProps> = memo(
             )
           }
           return (
-            <Anchor href={href ?? '#'} target="_blank" rel="noopener noreferrer" kind="inline">
+            <Anchor
+              href={href ?? '#'}
+              target="_blank"
+              rel="noopener noreferrer"
+              kind="inline"
+            >
               {children}
             </Anchor>
           )

@@ -74,8 +74,8 @@ export const DataSourcesPanel: FC<DataSourcesPanelProps> = ({ onSourceToggle, on
   )
   const isProjectScope = Boolean(currentProject)
   const filesFooterCopy = isProjectScope
-    ? 'Files in project memory stay available across sessions in this project until deleted.'
-    : 'Files in this standalone chat stay only in this chat and are not reused by projects or other chats.'
+    ? 'Files uploaded to this project stay available across chats in this project until deleted.'
+    : 'Files in this chat stay only in this chat and are not reused by projects or other chats.'
 
   // Check if user has valid auth token
   const hasValidToken = !!idToken
@@ -184,9 +184,9 @@ export const DataSourcesPanel: FC<DataSourcesPanelProps> = ({ onSourceToggle, on
             <Text
               kind="body/regular/xs"
               className="truncate text-subtle"
-              title={isProjectScope ? currentProject?.title : 'Standalone chat'}
+              title={isProjectScope ? currentProject?.title : 'This chat'}
             >
-              {isProjectScope ? currentProject?.title : 'Standalone chat'}
+              {isProjectScope ? currentProject?.title : 'This chat'}
             </Text>
           </Flex>
         </Flex>

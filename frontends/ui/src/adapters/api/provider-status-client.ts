@@ -128,6 +128,8 @@ export interface LocalResearchOptionsFromAPI {
   knowledge_layer_enabled: boolean
   generate_summary: boolean
   top_k: number
+  min_total_sources_retrieved: number
+  min_total_cited_sources: number
   notes: string[]
 }
 
@@ -135,10 +137,30 @@ export interface ApplyLocalResearchOptionsRequestFromAPI {
   knowledge_layer_enabled: boolean
   generate_summary: boolean
   top_k: number
+  min_total_sources_retrieved: number
+  min_total_cited_sources: number
 }
 
 export interface ApplyLocalResearchOptionsResponseFromAPI extends ApplyConfigPresetResponseFromAPI {
   options?: LocalResearchOptionsFromAPI
+}
+
+export interface LocalTavilyApiKeyStatusFromAPI {
+  local_stack_running: boolean
+  can_edit: boolean
+  requires_reload: boolean
+  env_path?: string | null
+  configured: boolean
+  key_hint?: string | null
+  notes: string[]
+}
+
+export interface UpdateLocalTavilyApiKeyRequestFromAPI {
+  api_key: string
+}
+
+export interface UpdateLocalTavilyApiKeyResponseFromAPI extends ApplyConfigPresetResponseFromAPI {
+  status?: LocalTavilyApiKeyStatusFromAPI
 }
 
 export interface LocalConfigReloadStatusFromAPI {
@@ -270,6 +292,38 @@ export const createProviderStatusClient = (options: ProviderStatusClientOptions 
 
       if (!response.ok) {
         await handleApiError(response, 'Failed to apply local research options')
+      }
+
+      return response.json()
+    },
+
+    async getLocalTavilyApiKeyStatus(signal?: AbortSignal): Promise<LocalTavilyApiKeyStatusFromAPI> {
+      const response = await fetch('/api/local-stack/tavily-api-key', {
+        method: 'GET',
+        headers: getHeaders(),
+        signal,
+      })
+
+      if (!response.ok) {
+        await handleApiError(response, 'Failed to fetch local Tavily API key status')
+      }
+
+      return response.json()
+    },
+
+    async updateLocalTavilyApiKey(
+      payload: UpdateLocalTavilyApiKeyRequestFromAPI,
+      signal?: AbortSignal
+    ): Promise<UpdateLocalTavilyApiKeyResponseFromAPI> {
+      const response = await fetch('/api/local-stack/tavily-api-key', {
+        method: 'PATCH',
+        headers: getHeaders(),
+        body: JSON.stringify(payload),
+        signal,
+      })
+
+      if (!response.ok) {
+        await handleApiError(response, 'Failed to update local Tavily API key')
       }
 
       return response.json()

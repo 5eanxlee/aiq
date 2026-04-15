@@ -46,7 +46,7 @@ class KnowledgeRetrievalConfig(FunctionBaseConfig, name="knowledge_retrieval"):
 
     backend: BackendType = Field(default="llamaindex", description="Knowledge backend to use")
     collection_name: str = Field(default="default", description="Name of the collection/index to search")
-    top_k: int = Field(default=5, description="Number of results to return")
+    top_k: int = Field(default=3, description="Number of results to return")
     # Summarization options (applies to all backends)
     generate_summary: bool = Field(
         default=False, description="Generate one-sentence summary for each ingested document"
@@ -190,8 +190,9 @@ def _format_results(retrieval_result, query: str) -> str:
     Format retrieval results for LLM consumption.
 
     Returns a structured string that provides context for the agent.
-    The format includes explicit citation fields so the LLM knows exactly
-    what to use in its References section.
+    The format preserves citation metadata, but the guidance is to use
+    uploaded documents primarily as internal context unless the request
+    is explicitly about those documents or the fact is uniquely internal.
     """
     # Check for retrieval errors and surface them to the agent
     if not retrieval_result.success:
@@ -201,7 +202,15 @@ def _format_results(retrieval_result, query: str) -> str:
     if not retrieval_result.chunks:
         return f"No relevant documents found for query: '{query}'"
 
-    lines = [f"Found {len(retrieval_result.chunks)} relevant document(s):\n"]
+    lines = [
+        "Treat the following excerpts as internal background context from user-uploaded documents.",
+        "Use them to understand project-specific terminology, private facts, or the contents of the uploaded files.",
+        "Prefer external paper/web sources for general or public claims when those are available.",
+        "Cite these documents only when a point is uniquely derived from the uploaded material or the user explicitly asked about the documents.",
+        "",
+        f"Found {len(retrieval_result.chunks)} relevant document(s):",
+        "",
+    ]
 
     for i, chunk in enumerate(retrieval_result.chunks, 1):
         # Build citation string: "filename, p.X" or just "filename"
@@ -218,16 +227,29 @@ def _format_results(retrieval_result, query: str) -> str:
         lines.append(f"Citation: {citation}")
         lines.append(f"Content Type: {chunk.content_type.value}")
         lines.append(f"Relevance Score: {chunk.score:.2f}")
+        lines.append("Use As: Internal background context unless the claim is document-specific")
         lines.append("")
 
         # Content (truncate if very long)
         content = chunk.content
-        if len(content) > 1500:
-            content = content[:1500] + "... [truncated]"
+        if len(content) > 800:
+            content = content[:800] + "... [truncated]"
         lines.append(content)
         lines.append("")
 
     return "\n".join(lines)
+
+
+def _filter_generated_artifact_chunks(chunks):
+    """Exclude auto-generated report artifacts from project file context."""
+    filtered_chunks = []
+    for chunk in chunks:
+        metadata = chunk.metadata if isinstance(getattr(chunk, "metadata", None), dict) else {}
+        artifact_kind = metadata.get("artifact_kind")
+        if isinstance(artifact_kind, str) and artifact_kind in {"deep_research_report", "project_memory"}:
+            continue
+        filtered_chunks.append(chunk)
+    return filtered_chunks
 
 
 @register_function(config_type=KnowledgeRetrievalConfig)
@@ -308,6 +330,14 @@ async def knowledge_retrieval(config: KnowledgeRetrievalConfig, _builder: Builde
                 collection_name=target_collection,
                 top_k=top_k,
             )
+            filtered_chunks = _filter_generated_artifact_chunks(result.chunks)
+            if len(filtered_chunks) != len(result.chunks):
+                logger.info(
+                    "Knowledge search filtered %d generated artifact chunk(s) from collection %s",
+                    len(result.chunks) - len(filtered_chunks),
+                    target_collection,
+                )
+                result = result.model_copy(update={"chunks": filtered_chunks})
 
             # Format for LLM
             formatted = _format_results(result, query)
@@ -324,8 +354,8 @@ async def knowledge_retrieval(config: KnowledgeRetrievalConfig, _builder: Builde
     yield FunctionInfo.from_fn(
         search,
         description=(
-            "Search the knowledge base for relevant documents. "
-            "Use this to find information from ingested PDFs, documents, and other files. "
+            "Search the knowledge base for relevant uploaded documents. "
+            "Use this for project-specific or private document context and direct questions about ingested PDFs, documents, and other files. "
             f"Returns up to {top_k} relevant excerpts with citations."
         ),
     )

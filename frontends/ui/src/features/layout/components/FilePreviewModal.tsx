@@ -105,13 +105,13 @@ export const FilePreviewModal: FC<FilePreviewModalProps> = ({
   if (projectTitle) {
     metadataRows.unshift({ label: 'Project', value: projectTitle })
   } else if (preview) {
-    metadataRows.unshift({ label: 'Scope', value: 'Standalone chat' })
+    metadataRows.unshift({ label: 'Scope', value: 'This chat' })
   }
 
   const downloadLabel = preview?.file_name?.toLowerCase().endsWith('.pdf') ? 'Download PDF' : 'Download File'
   const canDownload = Boolean(preview && onDownload && !isLoading)
   const memoryBadgeLabel = projectTitle ? 'Project Memory' : 'Chat Only'
-  const memoryTitle = projectTitle ?? 'Standalone chat'
+  const memoryTitle = projectTitle ?? 'This chat'
 
   return (
     <Modal

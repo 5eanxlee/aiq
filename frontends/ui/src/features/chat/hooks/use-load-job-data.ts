@@ -31,7 +31,11 @@ import {
   type TodoItem,
 } from '@/adapters/api'
 import { useChatStore } from '../store'
-import { isUnavailableDeepResearchJobError } from '../lib/deep-research-errors'
+import {
+  isTransientDeepResearchTransportError,
+  isUnavailableDeepResearchJobError,
+} from '../lib/deep-research-errors'
+import { mergeDeepResearchCitations } from '../lib/citation-formatting'
 import { useAuth } from '@/adapters/auth'
 import { useLayoutStore } from '@/features/layout/store'
 
@@ -274,7 +278,14 @@ export const useLoadJobData = (): UseLoadJobDataReturn => {
             }
           >(),
           todos: null as TodoItem[] | null,
-          citations: [] as Array<{ url: string; content: string; isCited: boolean }>,
+          citations: [] as Array<{
+            url: string
+            content: string
+            isCited: boolean
+            title?: string
+            domain?: string
+            displayLabel?: string
+          }>,
           files: new Map<string, string>(), // filename -> latest content (deduped)
           reportContent: null as string | null,
         }
@@ -318,12 +329,16 @@ export const useLoadJobData = (): UseLoadJobDataReturn => {
             timestamp: now,
           }))
 
-          const citations = buffer.citations.map((c, idx) => ({
+          const citations = mergeDeepResearchCitations(buffer.citations, buffer.reportContent ?? '').map(
+            (c, idx) => ({
             id: `citation-${idx}`,
             url: c.url,
             content: c.content,
             isCited: c.isCited,
             timestamp: now,
+            title: c.title,
+            domain: c.domain,
+            displayLabel: c.displayLabel,
           }))
 
           const files = Array.from(buffer.files.entries()).map(([filename, content], idx) => ({
@@ -462,8 +477,15 @@ export const useLoadJobData = (): UseLoadJobDataReturn => {
               buffer.todos = todos
             },
 
-            onCitationUpdate: (url, content, isCited) => {
-              buffer.citations.push({ url, content, isCited: isCited ?? false })
+            onCitationUpdate: (url, content, isCited, metadata) => {
+              buffer.citations.push({
+                url,
+                content,
+                isCited: isCited ?? false,
+                title: metadata?.title,
+                domain: metadata?.domain,
+                displayLabel: metadata?.displayLabel,
+              })
             },
 
             onFileUpdate: (filename, content) => {
@@ -651,6 +673,9 @@ export const useLoadJobData = (): UseLoadJobDataReturn => {
         setStreamLoaded(true)
         setLoadedJobId(jobId)
       } catch (err) {
+        if (isTransientDeepResearchTransportError(err)) {
+          return
+        }
         const errorMessage = err instanceof Error ? err.message : 'Failed to load stream data'
         setError(errorMessage)
         console.error('Failed to load stream data:', err)

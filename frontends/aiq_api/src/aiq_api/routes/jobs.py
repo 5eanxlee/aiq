@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from datetime import UTC
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -52,6 +53,17 @@ if TYPE_CHECKING:
     from nat.front_ends.fastapi.fastapi_front_end_plugin_worker import FastApiFrontEndPluginWorker
 
 logger = logging.getLogger(__name__)
+
+_URL_RE = re.compile(r'https?://[^\s<>"\')\]}>]+', re.IGNORECASE)
+_ESCAPED_URL_SUFFIX_RE = re.compile(r'(?:\\(?:n|r|t|u[0-9a-fA-F]{4}))+.*$')
+
+
+def _clean_extracted_url(url: str) -> str:
+    cleaned = _ESCAPED_URL_SUFFIX_RE.sub("", url.strip())
+    parts = cleaned.split()
+    if parts:
+        cleaned = parts[0]
+    return cleaned.rstrip(".,;:!?)'\"}]>")
 
 
 class JobSubmitRequest(BaseModel):
@@ -969,6 +981,7 @@ def _normalize_url(url: str) -> str:
     from urllib.parse import urlunparse
 
     try:
+        url = _clean_extracted_url(url)
         parsed = urlparse(url)
         normalized_path = parsed.path.rstrip("/") if parsed.path != "/" else "/"
         return urlunparse(
@@ -988,6 +1001,48 @@ def _normalize_url(url: str) -> str:
 def _is_valid_url(url: str) -> bool:
     """Check if string is a valid HTTP/HTTPS URL."""
     return bool(url and url.lower().startswith(("http://", "https://")))
+
+
+def _extract_urls_from_text(text: str) -> list[str]:
+    """Extract normalized candidate URLs from report/output text."""
+    if not text:
+        return []
+
+    matches = _URL_RE.findall(str(text))
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for match in matches:
+        url = _clean_extracted_url(match)
+        if not _is_valid_url(url):
+            continue
+        normalized = _normalize_url(url)
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        cleaned.append(normalized)
+    return cleaned
+
+
+def _augment_cited_urls_from_final_report(
+    outputs: list[dict],
+    sources_found: set[str],
+    sources_cited: set[str],
+) -> None:
+    """Backfill cited URLs from the final report when citation_use events are missing."""
+    for output in outputs:
+        if output.get("type") != "output":
+            continue
+        if output.get("output_category") != "final_report":
+            continue
+
+        content = output.get("content")
+        if not isinstance(content, str):
+            continue
+
+        for normalized_url in _extract_urls_from_text(content):
+            if sources_found and normalized_url not in sources_found:
+                continue
+            sources_cited.add(normalized_url)
 
 
 def _process_artifact_update(
@@ -1061,6 +1116,8 @@ async def _get_job_artifacts(db_url: str, job_id: str) -> dict | None:
                 _process_tool_end(event, data, metadata, tool_call_map)
             elif event_type == "artifact.update":
                 _process_artifact_update(event, data, metadata, outputs, sources_found, sources_cited)
+
+        _augment_cited_urls_from_final_report(outputs, sources_found, sources_cited)
 
         tools = list(tool_call_map.values())
         result = {

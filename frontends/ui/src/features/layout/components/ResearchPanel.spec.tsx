@@ -10,14 +10,26 @@ import { ResearchPanel } from './ResearchPanel'
 const mockCloseRightPanel = vi.fn()
 const mockOpenRightPanel = vi.fn()
 const mockSetResearchPanelTab = vi.fn()
+const mockSetResearchPanelMode = vi.fn()
+const mockSetResearchPanelWidthPercent = vi.fn()
+const mockSetResearchPanelResizing = vi.fn()
 let mockRightPanel: string | null = 'research'
 let mockResearchPanelTab = 'tasks'
+let mockResearchPanelMode: 'split' | 'full-width' = 'split'
+let mockResearchPanelWidthPercent = 60
+let mockIsResearchPanelResizing = false
 
 vi.mock('../store', () => ({
   useLayoutStore: () => ({
     rightPanel: mockRightPanel,
     researchPanelTab: mockResearchPanelTab,
+    researchPanelMode: mockResearchPanelMode,
+    researchPanelWidthPercent: mockResearchPanelWidthPercent,
+    isResearchPanelResizing: mockIsResearchPanelResizing,
     setResearchPanelTab: mockSetResearchPanelTab,
+    setResearchPanelMode: mockSetResearchPanelMode,
+    setResearchPanelWidthPercent: mockSetResearchPanelWidthPercent,
+    setResearchPanelResizing: mockSetResearchPanelResizing,
     closeRightPanel: mockCloseRightPanel,
     openRightPanel: mockOpenRightPanel,
   }),
@@ -86,6 +98,9 @@ describe('ResearchPanel', () => {
     vi.clearAllMocks()
     mockRightPanel = 'research'
     mockResearchPanelTab = 'tasks'
+    mockResearchPanelMode = 'split'
+    mockResearchPanelWidthPercent = 60
+    mockIsResearchPanelResizing = false
     mockIsDeepResearchStreaming = false
     mockDeepResearchJobId = null
     mockDeepResearchStreamLoaded = false
@@ -178,6 +193,50 @@ describe('ResearchPanel', () => {
       await user.click(screen.getByTestId('research-panel-close'))
 
       expect(mockCloseRightPanel).toHaveBeenCalled()
+    })
+  })
+
+  describe('panel resizing', () => {
+    test('renders a resize handle while the panel is open', () => {
+      render(<ResearchPanel isAuthenticated={true} />)
+
+      expect(screen.getByTestId('research-panel-resize-handle')).toBeInTheDocument()
+      expect(screen.queryByTestId('research-panel-width-toggle')).not.toBeInTheDocument()
+    })
+
+    test('does not render the resize handle when the panel is closed', () => {
+      mockRightPanel = null
+
+      render(<ResearchPanel isAuthenticated={true} />)
+
+      expect(screen.queryByTestId('research-panel-resize-handle')).not.toBeInTheDocument()
+    })
+
+    test('updates panel width while dragging the resize handle', () => {
+      const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+        width: 1000,
+        height: 800,
+        top: 0,
+        left: 0,
+        right: 1000,
+        bottom: 800,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      } as DOMRect)
+
+      render(<ResearchPanel isAuthenticated={true} />)
+
+      const handle = screen.getByTestId('research-panel-resize-handle')
+      handle.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 400 }))
+      document.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 250 }))
+      document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+
+      expect(mockSetResearchPanelResizing).toHaveBeenCalledWith(true)
+      expect(mockSetResearchPanelWidthPercent).toHaveBeenCalledWith(60)
+      expect(mockSetResearchPanelWidthPercent).toHaveBeenCalledWith(75)
+      expect(mockSetResearchPanelResizing).toHaveBeenCalledWith(false)
+      rectSpy.mockRestore()
     })
   })
 

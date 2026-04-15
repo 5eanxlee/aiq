@@ -15,6 +15,7 @@
 
 """Tests for the ChatResearcherAgent."""
 
+from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 
 import pytest
@@ -81,6 +82,8 @@ class TestChatResearcherAgent:
             result = MagicMock()
             result.messages = list(messages)
             result.clarifier_log = "User clarified: technical focus"
+            result.plan_rejected = False
+            result.get_approved_plan_context.return_value = None
             return result
 
         return clarifier
@@ -189,18 +192,21 @@ class TestChatResearcherAgent:
         assert "messages" in result
 
     @pytest.mark.asyncio
-    async def test_run_shallow_research_flow(
+    async def test_run_research_queries_route_to_deep_flow(
         self,
         mock_intent_classifier,
         mock_shallow_research,
         mock_deep_research,
         mock_clarifier,
     ):
-        """Test run() handles shallow research flow (orchestration returns research + shallow)."""
+        """Test research queries always route to deep research even if the classifier says shallow."""
+        shallow_mock = AsyncMock(side_effect=mock_shallow_research)
+        deep_mock = AsyncMock(side_effect=mock_deep_research)
+
         agent = ChatResearcherAgent(
             intent_classifier_fn=mock_intent_classifier,
-            shallow_research_fn=mock_shallow_research,
-            deep_research_fn=mock_deep_research,
+            shallow_research_fn=shallow_mock,
+            deep_research_fn=deep_mock,
             clarifier_fn=mock_clarifier,
             enable_escalation=False,
         )
@@ -209,6 +215,9 @@ class TestChatResearcherAgent:
         result = await agent.run(state, thread_id="test-thread")
 
         assert result is not None
+        assert result["messages"][-1].content == "Here's a comprehensive report."
+        shallow_mock.assert_not_awaited()
+        deep_mock.assert_awaited()
 
     @pytest.mark.asyncio
     async def test_run_deep_research_flow(

@@ -13,11 +13,11 @@ const originalRevokeObjectURL = URL.revokeObjectURL
 const mockGetCachedUploadedFile = vi.fn()
 const mockCacheResolvedFile = vi.fn()
 const mockEnsureSession = vi.fn(() => 'session-1')
-const mockCurrentConversation: {
+let mockCurrentConversation: {
   id: string
   projectId?: string
   knowledgeCollectionName?: string
-} = {
+} | null = {
   id: 'session-1',
   projectId: PROJECT_ID,
   knowledgeCollectionName: PROJECT_COLLECTION,
@@ -227,9 +227,11 @@ describe('FileSourcesTab', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    mockCurrentConversation.id = 'session-1'
-    mockCurrentConversation.projectId = PROJECT_ID
-    mockCurrentConversation.knowledgeCollectionName = PROJECT_COLLECTION
+    mockCurrentConversation = {
+      id: 'session-1',
+      projectId: PROJECT_ID,
+      knowledgeCollectionName: PROJECT_COLLECTION,
+    }
     mockEnsureSession.mockReturnValue('session-1')
     mockProjectsState.currentProjectId = PROJECT_ID
     mockProjectsState.projects = [
@@ -279,18 +281,23 @@ describe('FileSourcesTab', () => {
     render(<FileSourcesTab />)
 
     expect(screen.getByText('No Project Files')).toBeInTheDocument()
-    expect(screen.getByText(/files uploaded to "Alpha Project" will be shared across sessions/i)).toBeInTheDocument()
+    expect(screen.getByText(/files uploaded to "Alpha Project" will be shared across chats/i)).toBeInTheDocument()
   })
 
   test('renders standalone empty state when no project is selected', () => {
-    mockCurrentConversation.projectId = undefined
-    mockCurrentConversation.knowledgeCollectionName = 'session-standalone'
+    mockCurrentConversation = {
+      id: 'session-1',
+      projectId: undefined,
+      knowledgeCollectionName: 'session-standalone',
+    }
     mockProjectsState.currentProjectId = null
 
     render(<FileSourcesTab />)
 
     expect(screen.getByText('No Chat Files')).toBeInTheDocument()
-    expect(screen.getByText(/files uploaded to this standalone chat stay available only in this chat/i)).toBeInTheDocument()
+    expect(
+      screen.getByText(/files uploaded to this chat stay available only in this chat/i)
+    ).toBeInTheDocument()
   })
 
   test('renders file upload zone in empty state', () => {
@@ -300,7 +307,11 @@ describe('FileSourcesTab', () => {
   })
 
   test('uploads into the project collection when the session has no explicit collection', async () => {
-    mockCurrentConversation.knowledgeCollectionName = undefined
+    mockCurrentConversation = {
+      id: 'session-1',
+      projectId: PROJECT_ID,
+      knowledgeCollectionName: undefined,
+    }
 
     render(<FileSourcesTab />)
 
@@ -352,8 +363,11 @@ describe('FileSourcesTab', () => {
   })
 
   test('shows chat file scope when viewing standalone files', () => {
-    mockCurrentConversation.projectId = undefined
-    mockCurrentConversation.knowledgeCollectionName = 'session-standalone'
+    mockCurrentConversation = {
+      id: 'session-1',
+      projectId: undefined,
+      knowledgeCollectionName: 'session-standalone',
+    }
     mockProjectsState.currentProjectId = null
 
     vi.mocked(useFileUpload).mockReturnValue({
@@ -371,7 +385,23 @@ describe('FileSourcesTab', () => {
     render(<FileSourcesTab />)
 
     expect(screen.getByText(/chat files \(1\)/i)).toBeInTheDocument()
-    expect(screen.getByText(/used only in this standalone chat/i)).toBeInTheDocument()
+    expect(screen.getByText(/used only in this chat/i)).toBeInTheDocument()
+  })
+
+  test('uses project memory when a new project chat draft has no active conversation yet', () => {
+    mockCurrentConversation = null
+    mockProjectsState.currentProjectId = PROJECT_ID
+
+    render(<FileSourcesTab />)
+
+    expect(vi.mocked(useFileUpload)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: undefined,
+        collectionName: PROJECT_COLLECTION,
+      })
+    )
+    expect(screen.getByText('No Project Files')).toBeInTheDocument()
+    expect(screen.getByText(/files uploaded to "Alpha Project" will be shared across chats/i)).toBeInTheDocument()
   })
 
   test('opens delete confirmation modal when delete is clicked', async () => {

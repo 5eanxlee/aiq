@@ -21,10 +21,13 @@ const chooseCurrentProjectId = (
   projects: Project[],
   preferredProjectId: string | null
 ): string | null => {
+  if (preferredProjectId === null) {
+    return null
+  }
   if (preferredProjectId && projects.some((project) => project.id === preferredProjectId)) {
     return preferredProjectId
   }
-  return projects[0]?.id ?? null
+  return null
 }
 
 export const useProjectsStore = create<ProjectsStore>()(
@@ -76,13 +79,28 @@ export const useProjectsStore = create<ProjectsStore>()(
       },
 
       setCurrentProjectId: (projectId) =>
-        set({ currentProjectId: projectId }, false, 'setCurrentProjectId'),
+        set(
+          (state) => (state.currentProjectId === projectId ? state : { currentProjectId: projectId }),
+          false,
+          'setCurrentProjectId'
+        ),
 
-      markHydrated: (hydrated) => set({ isHydrated: hydrated }, false, 'markHydrated'),
+      markHydrated: (hydrated) =>
+        set(
+          (state) => (state.isHydrated === hydrated ? state : { isHydrated: hydrated }),
+          false,
+          'markHydrated'
+        ),
 
-      setSyncing: (syncing) => set({ isSyncing: syncing }, false, 'setSyncing'),
+      setSyncing: (syncing) =>
+        set(
+          (state) => (state.isSyncing === syncing ? state : { isSyncing: syncing }),
+          false,
+          'setSyncing'
+        ),
 
-      setError: (error) => set({ error }, false, 'setError'),
+      setError: (error) =>
+        set((state) => (state.error === error ? state : { error }), false, 'setError'),
 
       getCurrentProject: () => {
         const { projects, currentProjectId } = get()
@@ -95,4 +113,3 @@ export const useProjectsStore = create<ProjectsStore>()(
     { name: 'ProjectsStore' }
   )
 )
-

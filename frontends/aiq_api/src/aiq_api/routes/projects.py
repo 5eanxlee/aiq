@@ -179,7 +179,7 @@ class CreateProjectArtifactRequest(BaseModel):
     citation_manifest: list[dict[str, Any]] = Field(default_factory=list)
     artifact_id: str | None = Field(default=None, max_length=64)
     created_at: datetime | None = None
-    promote_to_knowledge: bool = True
+    promote_to_knowledge: bool = False
 
 
 def _snapshot_response(snapshot: dict[str, Any] | None) -> SessionSnapshotResponse | None:

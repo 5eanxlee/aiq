@@ -45,6 +45,8 @@ from ..document_storage import stage_uploaded_document
 from .collections import _require_ingestor
 
 logger = logging.getLogger(__name__)
+_UPLOAD_READ_CHUNK_SIZE = 1024 * 1024
+_GENERATED_ARTIFACT_KINDS = {"deep_research_report", "project_memory"}
 
 
 class DocumentPreviewResponse(BaseModel):
@@ -60,6 +62,14 @@ class DocumentPreviewResponse(BaseModel):
     ingested_at: datetime | None = None
     summary: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+def _is_generated_artifact_file(file_info: FileInfo | None) -> bool:
+    if file_info is None:
+        return False
+    metadata = file_info.metadata if isinstance(file_info.metadata, dict) else {}
+    artifact_kind = metadata.get("artifact_kind")
+    return isinstance(artifact_kind, str) and artifact_kind in _GENERATED_ARTIFACT_KINDS
 
 
 def add_document_routes(router: APIRouter):
@@ -101,15 +111,31 @@ def add_document_routes(router: APIRouter):
                 original_filename = file.filename or "unknown"
                 original_filenames.append(original_filename)
                 suffix = f"_{original_filename}" if original_filename else ""
-                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-                    content = await file.read()
-                    tmp.write(content)
-                    temp_paths.append(tmp.name)
-                    logger.debug(f"Saved uploaded file to {tmp.name}")
+                temp_path: str | None = None
+                try:
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                        temp_path = tmp.name
+                        temp_paths.append(temp_path)
+                        while True:
+                            chunk = await file.read(_UPLOAD_READ_CHUNK_SIZE)
+                            if not chunk:
+                                break
+                            tmp.write(chunk)
+                        logger.debug("Saved uploaded file to %s", tmp.name)
+                finally:
+                    try:
+                        await file.close()
+                    except Exception as close_error:
+                        logger.warning(
+                            "Failed to close upload handle for %s: %s",
+                            original_filename,
+                            close_error,
+                        )
+
                 staged_uploads.append(
                     stage_uploaded_document(
                         collection_name=collection_name,
-                        source_path=tmp.name,
+                        source_path=temp_path,
                         original_filename=original_filename,
                         content_type=file.content_type,
                     )
@@ -181,6 +207,12 @@ def add_document_routes(router: APIRouter):
                 discard_staged_documents(collection_name, staged_uploads)
             logger.error(f"Failed to upload documents: {e}")
             raise HTTPException(status_code=500, detail=str(e))
+        finally:
+            for file in files:
+                try:
+                    await file.close()
+                except Exception:
+                    pass
 
     @router.get(
         "/v1/collections/{collection_name}/documents",
@@ -199,7 +231,7 @@ def add_document_routes(router: APIRouter):
             raise HTTPException(status_code=404, detail=f"Collection '{collection_name}' not found")
 
         try:
-            return ingestor.list_files(collection_name)
+            return [file_info for file_info in ingestor.list_files(collection_name) if not _is_generated_artifact_file(file_info)]
         except Exception as e:
             logger.error(f"Failed to list documents: {e}")
             raise HTTPException(status_code=500, detail=str(e))
@@ -230,6 +262,8 @@ def add_document_routes(router: APIRouter):
                 )
 
             if file_info is None:
+                raise HTTPException(status_code=404, detail=f"Document '{file_id}' not found")
+            if _is_generated_artifact_file(file_info):
                 raise HTTPException(status_code=404, detail=f"Document '{file_id}' not found")
 
             summary = None

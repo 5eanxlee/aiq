@@ -98,7 +98,7 @@ export const looksLikeGeneratedRuntimeConfig = (value?: string | null): boolean 
   }
 
   const filename = value.split('/').pop() ?? value
-  return /^nat_config.*\.ya?ml$/i.test(filename)
+  return /^(?:nat_config.*|config_runtime_.*)\.ya?ml$/i.test(filename)
 }
 
 export const getConfigKindLabel = (config: ConfigPresetFromAPI): string =>
@@ -200,14 +200,14 @@ export const formatConfigPathLabel = (value?: string | null): string | null => {
   }
 
   const filename = value.split('/').pop() ?? value
+  if (looksLikeGeneratedRuntimeConfig(value)) {
+    return 'Runtime File'
+  }
   if (/^config_preset_/.test(filename)) {
     return 'Preset File'
   }
   if (/^config_/.test(filename)) {
     return 'Workflow File'
-  }
-  if (looksLikeGeneratedRuntimeConfig(value)) {
-    return 'Runtime File'
   }
   return 'Config Source'
 }
@@ -230,7 +230,7 @@ export const getConfigDisplayMeta = ({
     return {
       title: 'Generated Runtime Config',
       summary:
-        'The running backend was launched from a generated NAT config file, so the original preset name could not be recovered.',
+        'The running backend was launched from a generated runtime config file, so the original preset name could not be recovered.',
     }
   }
 
@@ -284,7 +284,7 @@ export const getCurrentConfigDescription = ({
     looksLikeGeneratedRuntimeConfig(configRuntime?.current_config_name) ||
     looksLikeGeneratedRuntimeConfig(configRuntime?.current_config_path)
   ) {
-    return 'This backend is running a generated NAT config file, so the original preset could not be confirmed from the current process.'
+    return 'This backend is running a generated runtime config file, so the original preset could not be confirmed from the current process.'
   }
 
   return getConfigDisplayMeta({

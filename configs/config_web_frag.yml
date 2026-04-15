@@ -111,7 +111,7 @@ functions:
     _type: knowledge_retrieval
     backend: foundational_rag
     collection_name: ${COLLECTION_NAME:-test_collection}
-    top_k: 5
+    top_k: 3
     rag_url: ${RAG_SERVER_URL:-http://localhost:8081}
     ingest_url: ${RAG_INGEST_URL:-http://localhost:8082}
     timeout: 300

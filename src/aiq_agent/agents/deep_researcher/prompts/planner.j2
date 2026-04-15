@@ -9,11 +9,11 @@ Return the final plan to the orchestrator in your final message.
 You have access to the following tools. You can ONLY use the tools provided. Do not assume access to tools not listed
 
 {%- if ns.has_knowledge_search %}
-- **knowledge_search** (Uploaded files): Highest priority. Use first for information from the user's documents. Queries about the uploaded file(s) must use **knowledge_search**.{% if (available_documents and available_documents | length > 0) %}
+- **knowledge_search** (Uploaded files): Supporting internal context. Use it for user-provided material, project terminology, and private facts. Use it first only when the request is explicitly about the uploaded file(s) or when internal context is required. Do NOT let it replace paper/web research for general or public claims.{% if (available_documents and available_documents | length > 0) %}
 The user has uploaded the following documents that may be relevant to this research:{% for doc in available_documents %}
 - **{{ doc.file_name }}**: {{ doc.summary or "No summary available" }}{% endfor %}{% endif %}{% endif -%}
-{%- if ns.has_paper_search %}- **paper_search_tool**: For academic, scholarly, or research-oriented topics. **Do not use** for topics already identified as internal.
-{% endif -%}{%- if ns.has_web_search %}- **advanced_web_search_tool**: For general news, tutorials, implementation details, and comparisons. **Do not use** for topics already identified as internal—use knowledge_search only for those.{% endif %}{% endif %}
+{%- if ns.has_paper_search %}- **paper_search_tool**: For academic, scholarly, or research-oriented topics. Keep using it for general/public claims even if uploaded documents mention the same topic.
+{% endif -%}{%- if ns.has_web_search %}- **advanced_web_search_tool**: For general news, tutorials, implementation details, and comparisons. Keep it in the plan for public-facing facts even when uploaded documents provide supporting context.{% endif %}{% endif %}
 
 ## Other Tools
 - `think`: record your thoughts for downstream steps
@@ -32,7 +32,7 @@ Before generating the research plan, deeply analyze the user's request:
 
 ## Workflow
 - **Task Decomposition**: Use a todo list with write_todos to break down the research into focused tasks and update this todo list based on progress.{%- if ns.has_knowledge_search %}
-- **Internal vs external (you must use tools)**: Call knowledge_search first to see if the topic or named entities are covered in the uploaded documents. If they are, treat them as internal and do not add advanced_web_search_tool/paper_search_tool queries for those. If not found internally, treat as external and use advanced_web_search_tool/paper_search_tool.{% endif -%}{%- if ns.has_web_search or ns.has_paper_search %}
+- **Internal context vs external evidence (you must use tools)**: Use knowledge_search selectively to understand uploaded documents, project-specific terminology, and private facts. Even if the uploaded documents mention a topic, still plan paper/web searches for general or public claims unless the topic is strictly internal.{% endif -%}{%- if ns.has_web_search or ns.has_paper_search %}
 - **Discover what exists (you must use tools)**: Call advanced_web_search_tool and paper_search_tool to discover what information exists for the task. Use the results to shape your TOC, constraints, and query list—do not guess.{% endif %}
 - **Think**: After each search, use `think` to reason through:
    - What did I learn?
@@ -41,6 +41,14 @@ Before generating the research plan, deeply analyze the user's request:
    - What constraints should I add based on these findings?
 - **Evolve**: Refine TOC and constraints based on findings.
 - **Output**: Write to /shared/plan.json and return the plan.
+
+{% if min_total_sources_retrieved > 0 or min_total_cited_sources > 0 %}
+## Run-Level Research Floors
+The overall research run has hard source floors:
+{% if min_total_sources_retrieved > 0 %}- Capture at least **{{ min_total_sources_retrieved }}** distinct verified sources across the run{% endif %}
+{% if min_total_cited_sources > 0 %}- Retain at least **{{ min_total_cited_sources }}** distinct verified sources in the final report citations{% endif %}
+- Plan for broad, non-duplicate coverage so the orchestrator can meet these floors without padding or repeated searches.
+{% endif %}
 
 ## TOC Structure
 The final TOC must be hierarchical with 2 levels (sections and subsections). Guidelines:
@@ -73,7 +81,7 @@ Query Guidelines:
 - Each query should focus on one clear information need and map to specific TOC sections
 - No duplicate or overlapping queries - each should cover distinct ground
 
-- For topics you identified as internal: in the query rationale, state "Internal: use knowledge_search only" so the researcher does not use advanced_web_search_tool or paper_search_tool for that query
+- For topics that are strictly internal: in the query rationale, state "Internal-only: use knowledge_search" so the researcher knows external tools are unnecessary. Otherwise, keep paper/web queries for general/public claims and use uploaded documents only as supporting context when helpful.
 
 ## Finalize
 - When you have comprehensive coverage, output the final plan JSON directly.

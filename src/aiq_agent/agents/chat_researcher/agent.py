@@ -284,12 +284,12 @@ class ChatResearcherAgent:
                 return {"messages": [result.messages[-1]]}
 
         def route_after_orchestration(state: ChatResearcherState) -> str:
-            """From combined orchestration: meta -> END (response already in messages), else by depth."""
+            """Route every research request through deep research; shallow mode is disabled."""
             if state.user_intent and state.user_intent.intent == "meta":
                 return "END"
-            if state.depth_decision and state.depth_decision.decision == "deep":
+            if self.enable_clarifier:
                 return "clarifier"
-            return "shallow_research"
+            return "deep_research"
 
         def should_escalate(state: ChatResearcherState) -> str:
             if not self.enable_escalation:
@@ -341,7 +341,7 @@ class ChatResearcherAgent:
             {
                 "END": END,
                 "clarifier": "clarifier",
-                "shallow_research": "shallow_research",
+                "deep_research": "deep_research",
             },
         )
 

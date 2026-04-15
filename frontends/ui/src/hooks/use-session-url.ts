@@ -4,9 +4,9 @@
 /**
  * useSessionUrl Hook
  *
- * Syncs the current project/session selection with the URL query parameters.
+ * Syncs the active project/chat selection with the URL query parameters.
  * - On mount, reads ?project=xxx&session=yyy from the URL and restores state
- * - Provides updateRouteUrl to update URL when project or session changes
+ * - Provides updateRouteUrl to update URL when project or chat changes
  * - Handles invalid/missing project or session IDs gracefully
  */
 
@@ -18,7 +18,7 @@ import { useChatStore } from '@/features/chat'
 import { useProjectsStore } from '@/features/projects'
 
 interface UseSessionUrlOptions {
-  /** Whether the user is authenticated (sessions only work when authenticated) */
+  /** Whether the user is authenticated (session sync only works when authenticated) */
   isAuthenticated: boolean
 }
 
@@ -31,24 +31,26 @@ interface UseSessionUrlReturn {
 
 /**
  * Hook to sync session state with URL query parameters.
- * Enables refreshing to the same session and shareable session URLs.
+ * Enables refreshing to the same chat and shareable chat URLs.
  */
 export function useSessionUrl({ isAuthenticated }: UseSessionUrlOptions): UseSessionUrlReturn {
   const router = useRouter()
   const pathname = usePathname() ?? '/'
   const searchParams = useSearchParams()
 
-  const { currentConversation, currentUserId, selectConversation, getUserConversations } = useChatStore()
-  const currentProjectId = useProjectsStore((state) => state.currentProjectId)
-  const setCurrentProjectId = useProjectsStore((state) => state.setCurrentProjectId)
+  const currentUserId = useChatStore((state) => state.currentUserId)
+  const currentConversation = useChatStore((state) => state.currentConversation)
+  const getUserConversations = useChatStore((state) => state.getUserConversations)
+  const selectConversation = useChatStore((state) => state.selectConversation)
+  const startNewSessionDraft = useChatStore((state) => state.startNewSessionDraft)
+
   const projects = useProjectsStore((state) => state.projects)
   const projectsHydrated = useProjectsStore((state) => state.isHydrated)
+  const currentProjectId = useProjectsStore((state) => state.currentProjectId)
+  const setCurrentProjectId = useProjectsStore((state) => state.setCurrentProjectId)
 
-  // Track if we've done the initial URL sync to avoid duplicate effects
   const initialSyncDone = useRef(false)
 
-  // Read session from URL on mount and select it
-  // Wait for both isAuthenticated AND currentUserId to be set (user ID is synced by chat hooks)
   useEffect(() => {
     if (
       !isAuthenticated ||
@@ -69,13 +71,21 @@ export function useSessionUrl({ isAuthenticated }: UseSessionUrlOptions): UseSes
     }
 
     const userConversations = getUserConversations()
-    const session = sessionId ? userConversations.find((conversation) => conversation.id === sessionId) : null
+    const session = sessionId
+      ? userConversations.find((conversation) => conversation.id === sessionId) ?? null
+      : null
     const projectExists = projectId ? projects.some((project) => project.id === projectId) : false
 
     if (session) {
-      selectConversation(session.id)
+      if (currentConversation?.id !== session.id) {
+        selectConversation(session.id)
+      }
+      setCurrentProjectId(session.projectId ?? null)
     } else if (projectId && projectExists) {
       setCurrentProjectId(projectId)
+      if (currentConversation?.projectId !== projectId || currentConversation?.id) {
+        startNewSessionDraft()
+      }
     } else {
       const newParams = new URLSearchParams(searchParams.toString())
       newParams.delete('session')
@@ -93,26 +103,25 @@ export function useSessionUrl({ isAuthenticated }: UseSessionUrlOptions): UseSes
     projectsHydrated,
     projects,
     router,
-    selectConversation,
-    setCurrentProjectId,
     getUserConversations,
+    currentConversation?.id,
+    currentConversation?.projectId,
+    selectConversation,
+    startNewSessionDraft,
+    setCurrentProjectId,
   ])
 
-  // Update URL when current conversation changes (but not on initial load)
   useEffect(() => {
-    if (!isAuthenticated || !currentUserId || !searchParams || !initialSyncDone.current) return
+    if (!isAuthenticated || !currentUserId || !searchParams || !initialSyncDone.current) {
+      return
+    }
 
     const urlSessionId = searchParams.get('session')
     const urlProjectId = searchParams.get('project')
     const currentSessionId = currentConversation?.id ?? null
-    const effectiveProjectId = currentConversation
-      ? currentConversation.projectId ?? null
-      : currentProjectId ?? null
+    const effectiveProjectId = currentConversation?.projectId ?? currentProjectId ?? null
 
-    if (
-      currentSessionId !== urlSessionId ||
-      effectiveProjectId !== urlProjectId
-    ) {
+    if (currentSessionId !== urlSessionId || effectiveProjectId !== urlProjectId) {
       const newParams = new URLSearchParams(searchParams.toString())
       if (effectiveProjectId) {
         newParams.set('project', effectiveProjectId)

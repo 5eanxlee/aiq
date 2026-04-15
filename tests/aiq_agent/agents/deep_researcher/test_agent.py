@@ -37,6 +37,19 @@ def web_search_tool(query: str) -> str:
     return f"Results for: {query}"
 
 
+def make_long_report(sources_section: str) -> str:
+    """Build a report that satisfies the baseline completeness heuristics."""
+    intro = "A" * 2600
+    analysis = "B" * 2600
+    return (
+        "# Research Report\n\n"
+        f"## Introduction\n\n{intro}\n\n"
+        f"## Analysis\n\n{analysis}\n\n"
+        "## Sources\n"
+        f"{sources_section}"
+    )
+
+
 class TestDeepResearcherAgent:
     """Tests for the DeepResearcherAgent class."""
 
@@ -328,6 +341,78 @@ class TestDeepResearcherAgent:
             assert result.messages[1].content == "I'll help with that."
             assert result.messages[2].content == "Search results here"
             assert result.messages[3].content == "Here's my final analysis."
+
+    @pytest.mark.asyncio
+    async def test_run_enforces_min_total_sources_retrieved(self, mock_llm_provider, real_tool):
+        """Run should fail when the run-level retrieved-source floor is not met."""
+        report = make_long_report("[1] Example: https://example.com\n")
+
+        mock_agent = MagicMock()
+        mock_agent.with_config = MagicMock(return_value=mock_agent)
+        mock_agent.ainvoke = AsyncMock(return_value={"messages": [AIMessage(content=report)]})
+
+        with patch("aiq_agent.agents.deep_researcher.agent.create_deep_agent", return_value=mock_agent):
+            from aiq_agent.agents.deep_researcher.agent import DeepResearcherAgent
+
+            agent = DeepResearcherAgent(
+                llm_provider=mock_llm_provider,
+                tools=[real_tool],
+                min_total_sources_retrieved=2,
+            )
+            agent.source_registry_middleware.registry.add(SourceEntry(url="https://example.com"))
+            state = DeepResearchAgentState(messages=[HumanMessage(content="Test query")])
+
+            with pytest.raises(RuntimeError, match="insufficient_total_sources_retrieved"):
+                await agent.run(state)
+
+    @pytest.mark.asyncio
+    async def test_run_enforces_min_total_cited_sources(self, mock_llm_provider, real_tool):
+        """Run should fail when the final report cites too few distinct verified sources."""
+        report = make_long_report("[1] Example: https://example.com\n")
+
+        mock_agent = MagicMock()
+        mock_agent.with_config = MagicMock(return_value=mock_agent)
+        mock_agent.ainvoke = AsyncMock(return_value={"messages": [AIMessage(content=report)]})
+
+        with patch("aiq_agent.agents.deep_researcher.agent.create_deep_agent", return_value=mock_agent):
+            from aiq_agent.agents.deep_researcher.agent import DeepResearcherAgent
+
+            agent = DeepResearcherAgent(
+                llm_provider=mock_llm_provider,
+                tools=[real_tool],
+                min_total_cited_sources=2,
+            )
+            agent.source_registry_middleware.registry.add(SourceEntry(url="https://example.com"))
+            agent.source_registry_middleware.registry.add(SourceEntry(url="https://second.example.com"))
+            state = DeepResearchAgentState(messages=[HumanMessage(content="Test query")])
+
+            with pytest.raises(RuntimeError, match="insufficient_total_cited_sources"):
+                await agent.run(state)
+
+    @pytest.mark.asyncio
+    async def test_run_resets_instance_registry_between_direct_runs(self, mock_llm_provider, real_tool):
+        """Direct runs without a session registry should not inherit sources from earlier runs."""
+        report = make_long_report("[1] Example: https://example.com\n")
+
+        mock_agent = MagicMock()
+        mock_agent.with_config = MagicMock(return_value=mock_agent)
+        mock_agent.ainvoke = AsyncMock(return_value={"messages": [AIMessage(content=report)]})
+
+        with patch("aiq_agent.agents.deep_researcher.agent.create_deep_agent", return_value=mock_agent):
+            from aiq_agent.agents.deep_researcher.agent import DeepResearcherAgent
+
+            agent = DeepResearcherAgent(
+                llm_provider=mock_llm_provider,
+                tools=[real_tool],
+            )
+            state = DeepResearchAgentState(messages=[HumanMessage(content="Test query")])
+
+            agent.source_registry_middleware.registry.add(SourceEntry(url="https://example.com"))
+            first_result = await agent.run(state)
+            assert first_result.messages
+
+            with pytest.raises(Exception, match="no sources were captured"):
+                await agent.run(state)
 
 
 class TestRunRetryStatePreservation:

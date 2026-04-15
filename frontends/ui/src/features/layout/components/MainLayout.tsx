@@ -6,17 +6,15 @@
  *
  * The main application layout container that orchestrates:
  * - AppBar (top)
- * - SessionsPanel (left, overlay)
- * - ChatArea + InputArea (center, responsive width)
- * - ResearchPanel (right, pushes content - takes 60% when open)
- * - DataSourcesPanel / ProvidersPanel / SettingsPanel (right, overlay)
- *
- * Handles auth state to show different UI for logged-in vs logged-out users.
+ * - SessionsPanel (left)
+ * - ChatArea + InputArea (center)
+ * - ResearchPanel (right, push layout)
+ * - DataSourcesPanel / ProvidersPanel / SettingsPanel (right overlays)
  */
 
 'use client'
 
-import { type FC, useCallback } from 'react'
+import { type FC, useCallback, useEffect, useMemo } from 'react'
 import { Flex } from '@/adapters/ui'
 import { createProjectsClient } from '@/adapters/api'
 import { useAuth } from '@/adapters/auth'
@@ -34,32 +32,33 @@ import { hasActiveDeepResearchJob } from '@/features/chat/lib/session-activity'
 import { useLayoutStore } from '../store'
 import { useSessionUrl } from '@/hooks/use-session-url'
 import { useProjectsStore } from '@/features/projects'
+import type { ChatMessage } from '@/features/chat'
 
 interface MainLayoutProps {
-  /** Whether the user is authenticated */
   isAuthenticated?: boolean
-  /** Whether authentication is required (false = using default user) */
   authRequired?: boolean
-  /** User information for AppBar */
   user?: {
     name?: string
     email?: string
     image?: string
   }
-  /** Callback when sign in is clicked */
   onSignIn?: () => void
-  /** Callback when sign out is clicked */
   onSignOut?: () => void
 }
 
 const sortByUpdatedAtDesc = <T extends { updatedAt: Date | string }>(items: T[]): T[] =>
   [...items].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
 
-/**
- * Main application layout with all panels and regions.
- * Manages the overall structure and panel states.
- * Chat state is managed via the useChatStore.
- */
+const getLatestDeepResearchMessage = (messages: ChatMessage[]): ChatMessage | null => {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i]
+    if (message.messageType === 'agent_response' && message.deepResearchJobId) {
+      return message
+    }
+  }
+  return null
+}
+
 export const MainLayout: FC<MainLayoutProps> = ({
   isAuthenticated = false,
   authRequired = false,
@@ -68,123 +67,268 @@ export const MainLayout: FC<MainLayoutProps> = ({
   onSignOut,
 }) => {
   const { idToken } = useAuth()
+
   const currentConversation = useChatStore((state) => state.currentConversation)
   const currentUserId = useChatStore((state) => state.currentUserId)
-  const getUserConversations = useChatStore((state) => state.getUserConversations)
+  const conversations = useChatStore((state) => state.conversations)
   const selectConversation = useChatStore((state) => state.selectConversation)
   const startNewSessionDraft = useChatStore((state) => state.startNewSessionDraft)
   const deleteConversation = useChatStore((state) => state.deleteConversation)
   const updateConversationTitle = useChatStore((state) => state.updateConversationTitle)
   const replaceUserConversations = useChatStore((state) => state.replaceUserConversations)
+  const patchConversationMessage = useChatStore((state) => state.patchConversationMessage)
+  const addDeepResearchBanner = useChatStore((state) => state.addDeepResearchBanner)
+  const persistDeepResearchToSession = useChatStore((state) => state.persistDeepResearchToSession)
   const isStreaming = useChatStore((state) => state.isStreaming)
   const pendingInteraction = useChatStore((state) => state.pendingInteraction)
   const isDeepResearchStreaming = useChatStore((state) => state.isDeepResearchStreaming)
   const deepResearchOwnerConversationId = useChatStore((state) => state.deepResearchOwnerConversationId)
+
   const projects = useProjectsStore((state) => state.projects)
   const currentProjectId = useProjectsStore((state) => state.currentProjectId)
   const setCurrentProjectId = useProjectsStore((state) => state.setCurrentProjectId)
   const upsertProject = useProjectsStore((state) => state.upsertProject)
   const removeProject = useProjectsStore((state) => state.removeProject)
 
-  const { rightPanel, closeRightPanel } = useLayoutStore()
+  const rightPanel = useLayoutStore((state) => state.rightPanel)
+  const researchPanelMode = useLayoutStore((state) => state.researchPanelMode)
+  const researchPanelWidthPercent = useLayoutStore((state) => state.researchPanelWidthPercent)
+  const isResearchPanelResizing = useLayoutStore((state) => state.isResearchPanelResizing)
+  const closeRightPanel = useLayoutStore((state) => state.closeRightPanel)
   const prefersReducedMotion = useReducedMotion()
 
-  // Deep research SSE hook - manages connection when deep research starts
   useDeepResearch()
 
-  // Sync session state with URL query parameters
   const { updateRouteUrl } = useSessionUrl({ isAuthenticated })
   const activeScopeProjectId = currentConversation
     ? currentConversation.projectId ?? null
     : currentProjectId ?? null
+  const userConversations = useMemo(
+    () =>
+      currentUserId
+        ? conversations.filter((conversation) => conversation.userId === currentUserId)
+        : [],
+    [conversations, currentUserId]
+  )
 
   const getScopeConversations = useCallback(
     (projectId: string | null) =>
       sortByUpdatedAtDesc(
-        getUserConversations().filter((conversation) =>
+        userConversations.filter((conversation) =>
           projectId ? conversation.projectId === projectId : !conversation.projectId
         )
       ),
-    [getUserConversations]
+    [userConversations]
   )
 
-  // Wrap selectConversation to also update URL
-  const handleSelectSession = useCallback(
-    (sessionId: string) => {
-      selectConversation(sessionId)
-      const conversation = getUserConversations().find((item) => item.id === sessionId)
-      updateRouteUrl(conversation?.projectId ?? null, sessionId)
-    },
-    [selectConversation, getUserConversations, updateRouteUrl]
+  const activeProject =
+    projects.find(
+      (project) =>
+        project.id === currentConversation?.projectId || project.id === activeScopeProjectId
+    ) ?? null
+
+  const projectsClient = useMemo(
+    () => createProjectsClient({ authToken: idToken }),
+    [idToken]
   )
 
-  // Start a new draft inside the currently selected scope.
-  const handleNewSession = useCallback(() => {
-    setCurrentProjectId(activeScopeProjectId)
-    startNewSessionDraft()
-    updateRouteUrl(activeScopeProjectId, null)
-    closeRightPanel()
+  useEffect(() => {
+    if (!currentConversation) {
+      return
+    }
+
+    const conversationProjectId = currentConversation.projectId ?? null
+    if (currentProjectId !== conversationProjectId) {
+      setCurrentProjectId(conversationProjectId)
+    }
+  }, [currentConversation, currentProjectId, setCurrentProjectId])
+
+  const preserveActiveDeepResearch = useCallback(() => {
+    if (
+      currentConversation?.id &&
+      isDeepResearchStreaming &&
+      deepResearchOwnerConversationId === currentConversation.id
+    ) {
+      persistDeepResearchToSession()
+    }
   }, [
-    activeScopeProjectId,
-    closeRightPanel,
-    setCurrentProjectId,
-    startNewSessionDraft,
-    updateRouteUrl,
+    currentConversation?.id,
+    deepResearchOwnerConversationId,
+    isDeepResearchStreaming,
+    persistDeepResearchToSession,
   ])
 
-  // Start a new draft outside any project so no shared project files are carried in.
-  const handleNewStandaloneChat = useCallback(() => {
-    setCurrentProjectId(null)
-    startNewSessionDraft()
-    updateRouteUrl(null, null)
-    closeRightPanel()
-  }, [closeRightPanel, setCurrentProjectId, startNewSessionDraft, updateRouteUrl])
-
-  const projectsClient = createProjectsClient({ authToken: idToken })
-
-  const handleSelectProject = useCallback(
-    (projectId: string) => {
-      setCurrentProjectId(projectId)
-      const nextConversation = getScopeConversations(projectId)[0] ?? null
-      if (nextConversation) {
-        selectConversation(nextConversation.id)
-        updateRouteUrl(projectId, nextConversation.id)
-      } else {
-        startNewSessionDraft()
-        updateRouteUrl(projectId, null)
+  const startDraftInContext = useCallback(
+    (projectId: string | null, options?: { preserveActive?: boolean }) => {
+      if (options?.preserveActive !== false) {
+        preserveActiveDeepResearch()
       }
+      setCurrentProjectId(projectId)
+      startNewSessionDraft()
+      updateRouteUrl(projectId, null)
+      closeRightPanel()
     },
     [
-      getScopeConversations,
-      selectConversation,
+      closeRightPanel,
+      preserveActiveDeepResearch,
       setCurrentProjectId,
       startNewSessionDraft,
       updateRouteUrl,
     ]
   )
 
-  const handleSelectStandalone = useCallback(() => {
-    setCurrentProjectId(null)
-    const standaloneConversations = getScopeConversations(null)
-    const currentStandaloneConversation =
-      currentConversation && !currentConversation.projectId ? currentConversation : null
-    const nextConversation = currentStandaloneConversation ?? standaloneConversations[0] ?? null
+  useEffect(() => {
+    let cancelled = false
+    let polling = false
 
+    const pollBackgroundJobs = async () => {
+      if (polling) {
+        return
+      }
+      polling = true
+
+      try {
+        const chatStoreApi = useChatStore as typeof useChatStore & {
+          getState?: () => ReturnType<typeof useChatStore>
+        }
+
+        if (typeof chatStoreApi.getState !== 'function') {
+          return
+        }
+
+        const { getJobStatus } = await import('@/adapters/api/deep-research-client')
+        const chatState = chatStoreApi.getState()
+        const conversations = chatState.getUserConversations()
+
+        for (const conversation of conversations) {
+          if (cancelled || conversation.id === chatState.currentConversation?.id) {
+            continue
+          }
+
+          const latestMessage = getLatestDeepResearchMessage(conversation.messages)
+          if (!latestMessage?.deepResearchJobId || !latestMessage.deepResearchJobStatus) {
+            continue
+          }
+
+          const jobId = latestMessage.deepResearchJobId
+          const currentJobStatus = latestMessage.deepResearchJobStatus
+          if (!['submitted', 'running'].includes(currentJobStatus)) {
+            continue
+          }
+
+          try {
+            const statusResponse = await getJobStatus(jobId, idToken || undefined)
+            if (cancelled) {
+              return
+            }
+
+            if (statusResponse.status === 'submitted' || statusResponse.status === 'running') {
+              if (statusResponse.status !== currentJobStatus) {
+                patchConversationMessage(conversation.id, latestMessage.id, {
+                  deepResearchJobStatus: statusResponse.status,
+                })
+              }
+              continue
+            }
+
+            const completedAtMs = statusResponse.updated_at
+              ? Date.parse(statusResponse.updated_at)
+              : Date.now()
+            const durationMs =
+              typeof statusResponse.elapsed_seconds === 'number'
+                ? Math.round(statusResponse.elapsed_seconds * 1000)
+                : latestMessage.deepResearchDurationMs
+            const terminalBannerType =
+              statusResponse.status === 'success'
+                ? 'success'
+                : statusResponse.status === 'interrupted'
+                  ? 'cancelled'
+                  : 'failure'
+
+            patchConversationMessage(conversation.id, latestMessage.id, {
+              deepResearchJobStatus: statusResponse.status,
+              isDeepResearchActive: false,
+              showViewReport: statusResponse.status === 'success',
+              deepResearchStartedAtMs: latestMessage.deepResearchStartedAtMs,
+              deepResearchCompletedAtMs: completedAtMs,
+              deepResearchDurationMs: durationMs,
+            })
+
+            const hasTerminalBanner = conversation.messages.some(
+              (message) =>
+                message.messageType === 'deep_research_banner' &&
+                message.deepResearchBannerData?.jobId === jobId &&
+                ['success', 'failure', 'cancelled'].includes(
+                  message.deepResearchBannerData?.bannerType || ''
+                )
+            )
+
+            if (!hasTerminalBanner) {
+              addDeepResearchBanner(terminalBannerType, jobId, conversation.id, {
+                durationMs: durationMs ?? undefined,
+              })
+            }
+          } catch (error) {
+            console.warn('Failed to poll background deep research job:', error)
+          }
+        }
+      } finally {
+        polling = false
+      }
+    }
+
+    void pollBackgroundJobs()
+    const interval = setInterval(() => {
+      void pollBackgroundJobs()
+    }, 5000)
+
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [idToken, patchConversationMessage, addDeepResearchBanner])
+
+  const handleNewChat = useCallback(() => {
+    startDraftInContext(activeScopeProjectId)
+  }, [activeScopeProjectId, startDraftInContext])
+
+  const handleSelectSession = useCallback(
+    (sessionId: string) => {
+      const conversation = userConversations.find((item) => item.id === sessionId)
+      if (!conversation) {
+        return
+      }
+
+      selectConversation(sessionId)
+      updateRouteUrl(conversation.projectId ?? null, sessionId)
+    },
+    [selectConversation, updateRouteUrl, userConversations]
+  )
+
+  const handleSelectRoot = useCallback(() => {
+    const nextConversation = getScopeConversations(null)[0] ?? null
     if (nextConversation) {
       selectConversation(nextConversation.id)
       updateRouteUrl(null, nextConversation.id)
-    } else {
-      startNewSessionDraft()
-      updateRouteUrl(null, null)
+      return
     }
-  }, [
-    currentConversation,
-    getScopeConversations,
-    selectConversation,
-    setCurrentProjectId,
-    startNewSessionDraft,
-    updateRouteUrl,
-  ])
+
+    startDraftInContext(null)
+  }, [getScopeConversations, selectConversation, startDraftInContext, updateRouteUrl])
+
+  const handleSelectProject = useCallback(
+    (projectId: string) => {
+      const nextConversation = getScopeConversations(projectId)[0] ?? null
+      if (nextConversation) {
+        selectConversation(nextConversation.id)
+        updateRouteUrl(projectId, nextConversation.id)
+        return
+      }
+
+      startDraftInContext(projectId)
+    },
+    [getScopeConversations, selectConversation, startDraftInContext, updateRouteUrl]
+  )
 
   const handleNewProject = useCallback(async () => {
     const created = await projectsClient.createProject({ title: 'New Project' })
@@ -198,10 +342,8 @@ export const MainLayout: FC<MainLayoutProps> = ({
       updatedAt: new Date(created.updated_at ?? Date.now()),
     }
     upsertProject(mappedProject)
-    setCurrentProjectId(mappedProject.id)
-    startNewSessionDraft()
-    updateRouteUrl(mappedProject.id, null)
-  }, [projectsClient, setCurrentProjectId, startNewSessionDraft, updateRouteUrl, upsertProject])
+    startDraftInContext(mappedProject.id)
+  }, [projectsClient, startDraftInContext, upsertProject])
 
   const handleRenameProject = useCallback(
     async (projectId: string, title: string) => {
@@ -224,114 +366,147 @@ export const MainLayout: FC<MainLayoutProps> = ({
       await projectsClient.deleteProject(projectId)
       removeProject(projectId)
 
-      if (currentUserId) {
-        const remainingConversations = getUserConversations().filter(
-          (conversation) => conversation.projectId !== projectId
-        )
-        const deletingActiveProject =
-          currentProjectId === projectId || currentConversation?.projectId === projectId
-        const nextConversation = deletingActiveProject ? remainingConversations[0] ?? null : currentConversation
-
-        replaceUserConversations(currentUserId, remainingConversations, nextConversation?.id ?? null)
-
-        if (deletingActiveProject) {
-          const nextProjectId =
-            nextConversation?.projectId ??
-            projects.find((project) => project.id !== projectId)?.id ??
-            null
-          setCurrentProjectId(nextProjectId)
-          if (nextConversation) {
-            updateRouteUrl(nextProjectId, nextConversation.id)
-          } else {
-            startNewSessionDraft()
-            updateRouteUrl(nextProjectId, null)
-          }
-        } else {
-          updateRouteUrl(currentProjectId ?? null, currentConversation?.id ?? null)
+      if (!currentUserId) {
+        if (currentProjectId === projectId || currentConversation?.projectId === projectId) {
+          startDraftInContext(null, { preserveActive: false })
         }
+        return
       }
+
+      const remainingConversations = userConversations.filter(
+        (conversation) => conversation.projectId !== projectId
+      )
+      const isDeletingActiveProject =
+        currentProjectId === projectId || currentConversation?.projectId === projectId
+
+      replaceUserConversations(
+        currentUserId,
+        remainingConversations,
+        isDeletingActiveProject ? null : (currentConversation?.id ?? undefined)
+      )
+
+      if (isDeletingActiveProject) {
+        const nextRootConversation = sortByUpdatedAtDesc(
+          remainingConversations.filter((conversation) => !conversation.projectId)
+        )[0]
+
+        if (nextRootConversation) {
+          selectConversation(nextRootConversation.id)
+          updateRouteUrl(null, nextRootConversation.id)
+        } else {
+          startDraftInContext(null, { preserveActive: false })
+        }
+        return
+      }
+
+      updateRouteUrl(currentConversation?.projectId ?? currentProjectId ?? null, currentConversation?.id ?? null)
     },
     [
       currentConversation?.id,
       currentConversation?.projectId,
-      currentUserId,
       currentProjectId,
-      getUserConversations,
-      projects,
+      currentUserId,
       projectsClient,
       removeProject,
       replaceUserConversations,
-      setCurrentProjectId,
-      startNewSessionDraft,
+      selectConversation,
+      startDraftInContext,
       updateRouteUrl,
+      userConversations,
     ]
   )
 
-  // Wrap deleteConversation to clear URL if deleting current session
   const handleDeleteSession = useCallback(
     async (sessionId: string) => {
+      const deletedConversation = userConversations.find((item) => item.id === sessionId) ?? null
       const wasCurrentSession = currentConversation?.id === sessionId
+      const deletedProjectId = deletedConversation?.projectId ?? null
+      const nextConversation =
+        sortByUpdatedAtDesc(
+          getScopeConversations(deletedProjectId).filter((conversation) => conversation.id !== sessionId)
+        )[0] ?? null
+
       try {
         await projectsClient.deleteSession(sessionId)
       } catch {
-        // Local-only sessions may not exist in backend yet.
+        // Root chats are local-only until explicitly attached to a project.
       }
+
       deleteConversation(sessionId)
-      if (wasCurrentSession) {
-        updateRouteUrl(activeScopeProjectId, null)
+
+      if (!wasCurrentSession) {
+        return
       }
+
+      if (nextConversation) {
+        selectConversation(nextConversation.id)
+        updateRouteUrl(deletedProjectId, nextConversation.id)
+        return
+      }
+
+      setCurrentProjectId(deletedProjectId)
+      startNewSessionDraft()
+      updateRouteUrl(deletedProjectId, null)
+      closeRightPanel()
     },
     [
-      activeScopeProjectId,
+      closeRightPanel,
       currentConversation?.id,
       deleteConversation,
+      getScopeConversations,
       projectsClient,
+      selectConversation,
+      setCurrentProjectId,
+      startNewSessionDraft,
       updateRouteUrl,
+      userConversations,
     ]
   )
 
-  // Delete all sessions in the active scope.
   const handleDeleteAllSessions = useCallback(async () => {
-    const sessionIds = getScopeConversations(activeScopeProjectId).map((conversation) => conversation.id)
+    const projectId = activeScopeProjectId
+    const sessionIds = getScopeConversations(projectId).map((conversation) => conversation.id)
     if (sessionIds.length === 0) {
-      updateRouteUrl(activeScopeProjectId, null)
+      startDraftInContext(projectId, { preserveActive: false })
       return
     }
 
     await Promise.allSettled(sessionIds.map((sessionId) => projectsClient.deleteSession(sessionId)))
-    sessionIds.forEach((sessionId) => deleteConversation(sessionId))
-    updateRouteUrl(activeScopeProjectId, null)
+    sessionIds.forEach((sessionId) => {
+      deleteConversation(sessionId)
+    })
+
+    setCurrentProjectId(projectId)
+    startNewSessionDraft()
+    updateRouteUrl(projectId, null)
+    closeRightPanel()
   }, [
     activeScopeProjectId,
+    closeRightPanel,
     deleteConversation,
     getScopeConversations,
     projectsClient,
+    setCurrentProjectId,
+    startDraftInContext,
+    startNewSessionDraft,
     updateRouteUrl,
   ])
 
-  // Check if research panel is open (pushes content instead of overlaying)
   const isResearchPanelOpen = rightPanel === 'research'
+  const isResearchPanelExpanded =
+    isResearchPanelOpen &&
+    (researchPanelMode === 'full-width' || researchPanelWidthPercent >= 100)
   const isNavigationBlocked = isStreaming || pendingInteraction !== null
 
-  // Get only conversations for the current authenticated user
   const scopeConversations = getScopeConversations(activeScopeProjectId)
-  const activeProject =
-    projects.find(
-      (project) =>
-        project.id === currentConversation?.projectId || project.id === activeScopeProjectId
-    ) ?? null
-
-  // Convert conversations to session format for sidebar
-  const sessions = scopeConversations.map((conv) => {
-    const hasActiveJob = hasActiveDeepResearchJob(conv.messages)
-
-    return {
-      id: conv.id,
-      title: conv.title,
-      date: new Date(conv.updatedAt),
-      hasActiveDeepResearch: hasActiveJob || (isDeepResearchStreaming && deepResearchOwnerConversationId === conv.id),
-    }
-  })
+  const sessions = scopeConversations.map((conversation) => ({
+    id: conversation.id,
+    title: conversation.title,
+    date: new Date(conversation.updatedAt),
+    hasActiveDeepResearch:
+      hasActiveDeepResearchJob(conversation.messages) ||
+      (isDeepResearchStreaming && deepResearchOwnerConversationId === conversation.id),
+  }))
 
   const projectItems = projects.map((project) => ({
     id: project.id,
@@ -341,56 +516,48 @@ export const MainLayout: FC<MainLayoutProps> = ({
 
   return (
     <Flex direction="col" className="h-screen min-w-[768px] overflow-x-auto overflow-y-hidden">
-      {/* AppBar - Fixed at top */}
       <AppBar
         projectTitle={activeProject?.title ?? undefined}
-        sessionTitle={currentConversation?.title || 'New Session'}
-        isStandaloneScope={activeScopeProjectId === null}
+        chatTitle={currentConversation?.title ?? 'New Chat'}
+        isProjectContext={Boolean(activeProject)}
         isAuthenticated={isAuthenticated}
         authRequired={authRequired}
         user={user}
-        onNewSession={handleNewStandaloneChat}
-        isNewSessionDisabled={isNavigationBlocked}
+        onNewChat={handleNewChat}
+        isNewChatDisabled={isNavigationBlocked}
         onSignIn={onSignIn}
         onSignOut={onSignOut}
       />
 
-      {/* Main Content Area - using explicit widths instead of flex for smoother animation */}
       <div className="relative flex flex-1 overflow-hidden">
-        {/* Center Content: Chat + Input - Responsive to research panel */}
         <div
+          data-testid="main-layout-chat-pane"
+          aria-hidden={isResearchPanelExpanded}
           className="flex flex-col overflow-hidden"
           style={{
-            width: isResearchPanelOpen ? '40%' : '100%',
-            transition: prefersReducedMotion ? 'none' : 'width 600ms ease-in-out',
+            width: isResearchPanelOpen
+              ? (isResearchPanelExpanded ? '0%' : `${Math.max(100 - researchPanelWidthPercent, 0)}%`)
+              : '100%',
+            minWidth: isResearchPanelExpanded ? '0px' : undefined,
+            opacity: isResearchPanelExpanded ? 0 : 1,
+            pointerEvents: isResearchPanelExpanded ? 'none' : 'auto',
+            transition: prefersReducedMotion || isResearchPanelResizing
+              ? 'none'
+              : 'width 600ms ease-in-out, opacity 180ms ease-in-out',
           }}
         >
-          {/* Chat Area - Scrollable */}
           <ChatArea isAuthenticated={isAuthenticated} onSignIn={onSignIn} />
-
-          {/* No sources warning - shown when no data sources or files available */}
           <NoSourcesBanner isAuthenticated={isAuthenticated} />
-
-          {/* Input Area - Fixed at bottom of chat */}
-          {/* Using WebSocket mode for full HITL (human-in-the-loop) support */}
-          <InputArea
-            isAuthenticated={isAuthenticated}
-            connectionMode="websocket"
-          />
+          <InputArea isAuthenticated={isAuthenticated} connectionMode="websocket" />
         </div>
 
-        {/* Research Panel (Right) - Pushes content, takes 60% width */}
         <ResearchPanel isAuthenticated={isAuthenticated} />
       </div>
 
-      {/* Overlay Panels - These slide over the content */}
-
-      {/* Sessions Panel (Left) - Only functional when authenticated */}
       <SessionsPanel
         projects={projectItems}
         selectedProjectId={activeScopeProjectId ?? undefined}
-        isStandaloneScope={activeScopeProjectId === null}
-        onSelectStandalone={handleSelectStandalone}
+        onSelectRoot={handleSelectRoot}
         onSelectProject={handleSelectProject}
         onNewProject={() => {
           void handleNewProject()
@@ -404,7 +571,7 @@ export const MainLayout: FC<MainLayoutProps> = ({
         sessions={sessions}
         selectedSessionId={currentConversation?.id}
         onSelectSession={handleSelectSession}
-        onNewSession={handleNewSession}
+        onNewSession={handleNewChat}
         onDeleteSession={(sessionId) => {
           void handleDeleteSession(sessionId)
         }}
@@ -417,13 +584,8 @@ export const MainLayout: FC<MainLayoutProps> = ({
         }}
       />
 
-      {/* Data Sources Panel (Right) - Overlay */}
       <DataSourcesPanel />
-
-      {/* Providers Panel (Right) - Overlay */}
       <ProvidersPanel />
-
-      {/* Settings Panel (Right) - Overlay */}
       <SettingsPanel />
     </Flex>
   )

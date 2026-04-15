@@ -10,12 +10,13 @@
 
 'use client'
 
-import { type FC, useCallback, useState } from 'react'
+import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Banner, Flex, Button } from '@/adapters/ui'
 import { useChatStore, useIsCurrentSessionBusy } from '@/features/chat'
+import { formatReportMarkdownWithCitations } from '@/features/chat/lib/citation-formatting'
 import { downloadAsMarkdown } from '@/utils/download-as-markdown'
 import { useDownloadPdfRoute } from '@/hooks/use-download-pdf'
-import { Download } from '@/adapters/ui/icons'
+import { Copy, Download } from '@/adapters/ui/icons'
 
 interface ExportFooterProps {
   /** Whether to disable export buttons (e.g., when no content) */
@@ -28,13 +29,26 @@ interface ExportFooterProps {
  */
 export const ExportFooter: FC<ExportFooterProps> = ({ disabled }) => {
   const reportContent = useChatStore((state) => state.reportContent)
+  const reportContentCategory = useChatStore((state) => state.reportContentCategory)
+  const deepResearchCitations = useChatStore((state) => state.deepResearchCitations)
   const conversationTitle = useChatStore((state) => state.currentConversation?.title)
   const { downloadPdf, isLoading: isPdfLoading, error: pdfError, clearError: clearPdfError } = useDownloadPdfRoute()
   const [mdError, setMdError] = useState<string | null>(null)
+  const [copyError, setCopyError] = useState<string | null>(null)
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied'>('idle')
+  const copyResetTimeoutRef = useRef<number | null>(null)
 
   // Defensive check: ensure reportContent is a string before calling trim()
   const reportContentStr = typeof reportContent === 'string' ? reportContent : ''
-  const hasContent = reportContentStr.trim().length > 0
+  const exportContent = useMemo(
+    () =>
+      reportContentCategory === 'research_notes'
+        ? reportContentStr
+        : formatReportMarkdownWithCitations(reportContentStr, deepResearchCitations),
+    [deepResearchCitations, reportContentCategory, reportContentStr]
+  )
+  const hasContent = exportContent.trim().length > 0
+  const copyActionLabel = reportContentCategory === 'research_notes' ? 'Copy Notes' : 'Copy Memo'
 
   // Uses centralized hook that checks BOTH ephemeral AND persisted state.
   // This survives page refresh: even if SSE ephemeral flags are lost,
@@ -49,23 +63,57 @@ export const ExportFooter: FC<ExportFooterProps> = ({ disabled }) => {
       ? 'Export report'
       : 'No content to export'
 
+  useEffect(() => {
+    return () => {
+      if (copyResetTimeoutRef.current !== null) {
+        window.clearTimeout(copyResetTimeoutRef.current)
+        copyResetTimeoutRef.current = null
+      }
+    }
+  }, [])
+
   const handleExportMarkdown = useCallback(() => {
     if (isExportDisabled) return
     setMdError(null)
-    const result = downloadAsMarkdown(reportContentStr, conversationTitle ?? undefined)
+    const result = downloadAsMarkdown(exportContent, conversationTitle ?? undefined)
     if (!result.success && result.error) {
       setMdError(result.error)
     }
-  }, [isExportDisabled, reportContentStr, conversationTitle])
+  }, [conversationTitle, exportContent, isExportDisabled])
 
   const handleExportPDF = useCallback(() => {
     if (isExportDisabled || isPdfLoading) return
-    downloadPdf(reportContentStr, conversationTitle ?? undefined)
-  }, [isExportDisabled, isPdfLoading, reportContentStr, downloadPdf, conversationTitle])
+    downloadPdf(exportContent, conversationTitle ?? undefined)
+  }, [conversationTitle, downloadPdf, exportContent, isExportDisabled, isPdfLoading])
 
-  const exportError = mdError || pdfError
+  const handleCopyMemo = useCallback(async () => {
+    if (isExportDisabled) return
+
+    setCopyError(null)
+    try {
+      if (!navigator?.clipboard?.writeText) {
+        throw new Error('Clipboard access is unavailable in this browser.')
+      }
+
+      await navigator.clipboard.writeText(exportContent)
+      setCopyStatus('copied')
+      if (copyResetTimeoutRef.current !== null) {
+        window.clearTimeout(copyResetTimeoutRef.current)
+      }
+      copyResetTimeoutRef.current = window.setTimeout(() => {
+        setCopyStatus('idle')
+        copyResetTimeoutRef.current = null
+      }, 2000)
+    } catch (error) {
+      setCopyStatus('idle')
+      setCopyError(error instanceof Error ? error.message : 'Failed to copy memo to clipboard.')
+    }
+  }, [exportContent, isExportDisabled])
+
+  const exportError = mdError || pdfError || copyError
   const clearExportError = useCallback(() => {
     setMdError(null)
+    setCopyError(null)
     clearPdfError()
   }, [clearPdfError])
 
@@ -105,6 +153,29 @@ export const ExportFooter: FC<ExportFooterProps> = ({ disabled }) => {
         >
           <Download />
           {isPdfLoading ? 'Generating...' : 'PDF'}
+        </Button>
+        <Button
+          kind="tertiary"
+          size="small"
+          onClick={() => void handleCopyMemo()}
+          disabled={isExportDisabled}
+          aria-label={
+            isExportDisabled
+              ? `${copyActionLabel} (${tooltipContent})`
+              : copyStatus === 'copied'
+                ? 'Memo copied to clipboard'
+                : `${copyActionLabel} to clipboard`
+          }
+          title={
+            isExportDisabled
+              ? tooltipContent
+              : copyStatus === 'copied'
+                ? 'Memo copied to clipboard'
+                : 'Copy the entire memo to your clipboard'
+          }
+        >
+          <Copy />
+          {copyStatus === 'copied' ? 'Copied' : copyActionLabel}
         </Button>
       </Flex>
     </Flex>

@@ -51,6 +51,16 @@ class DeepResearchAgentConfig(FunctionBaseConfig, name="deep_research_agent"):
     planner_llm: LLMRef | None = Field(default=None, description="LLM for planner")
     tools: list[FunctionRef | FunctionGroupRef] = Field(default_factory=list)
     max_loops: int = Field(default=2)
+    min_total_sources_retrieved: int = Field(
+        default=0,
+        ge=0,
+        description="Minimum number of distinct verified sources that must be captured during a run (0 disables).",
+    )
+    min_total_cited_sources: int = Field(
+        default=0,
+        ge=0,
+        description="Minimum number of distinct verified sources that must remain cited in the final report (0 disables).",
+    )
     verbose: bool = Field(default=True)
 
 
@@ -80,6 +90,8 @@ async def deep_research_agent(config: DeepResearchAgentConfig, builder: Builder)
         llm_provider=provider,
         tools=tools,
         max_loops=config.max_loops,
+        min_total_sources_retrieved=config.min_total_sources_retrieved,
+        min_total_cited_sources=config.min_total_cited_sources,
         verbose=verbose,
         callbacks=callbacks,
     )
@@ -95,6 +107,8 @@ async def deep_research_agent(config: DeepResearchAgentConfig, builder: Builder)
                     llm_provider=provider,
                     tools=selected_tools,
                     max_loops=config.max_loops,
+                    min_total_sources_retrieved=config.min_total_sources_retrieved,
+                    min_total_cited_sources=config.min_total_cited_sources,
                     verbose=verbose,
                     callbacks=callbacks,
                 )

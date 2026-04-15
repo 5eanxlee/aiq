@@ -67,7 +67,7 @@ const useThemeEffect = (theme: ThemeMode): void => {
 /**
  * Hook to fetch data sources on app initialization.
  * Loads available data sources from the API and updates the layout store.
- * Only web_search is enabled by default - users must manually enable other sources.
+ * Restores the last saved selection when available, otherwise falls back to API defaults.
  */
 const useDataSourcesInit = (): void => {
   const fetchDataSources = useLayoutStore((state) => state.fetchDataSources)
@@ -83,8 +83,9 @@ const useDataSourcesInit = (): void => {
 
 /**
  * Restores per-session data source toggles after the initial API fetch.
- * On page refresh, fetchDataSources sets enabledDataSourceIds to [web_search].
- * This hook overrides that default with the stored per-session selection.
+ * fetchDataSources initializes the layout store before the chat store has restored
+ * the active conversation. This hook reapplies the stored per-session selection
+ * once both sides are hydrated.
  * Waits for both availableDataSources and a restored conversation before restoring.
  */
 const useDataSourceSessionRestore = (): void => {
@@ -231,69 +232,40 @@ const ProjectStateHydrator = ({ children }: { children: ReactNode }): ReactNode 
 
       try {
         const client = createProjectsClient({ authToken: idToken })
-        let projects = await client.listProjects()
-        const totalSessions = projects.reduce((sum, project) => sum + project.sessions.length, 0)
-
-        if (totalSessions === 0) {
-          const localConversations = useChatStore
-            .getState()
-            .getUserConversations()
-            .map((conversation) => ({
-              ...conversation,
-              createdAt: parseDateValue(conversation.createdAt),
-              updatedAt: parseDateValue(conversation.updatedAt),
-            }))
-
-          if (localConversations.length > 0) {
-            const targetProject =
-              projects[0] ??
-              (await client.createProject({
-                title: 'General',
-              }))
-
-            for (const conversation of localConversations) {
-              await client.createSession(targetProject.id, {
-                id: conversation.id,
-                title: conversation.title,
-                knowledge_collection_name_override:
-                  conversation.knowledgeCollectionNameOverride ??
-                  conversation.knowledgeCollectionName ??
-                  conversation.id,
-                created_at: conversation.createdAt.toISOString(),
-                updated_at: conversation.updatedAt.toISOString(),
-              })
-
-              await client.putSessionSnapshot(conversation.id, {
-                messages: JSON.parse(JSON.stringify(conversation.messages)),
-                enabled_data_source_ids: conversation.enabledDataSourceIds ?? [],
-                updated_at: conversation.updatedAt.toISOString(),
-              })
-            }
-
-            projects = await client.listProjects()
-          }
-        }
+        const projects = await client.listProjects()
 
         if (cancelled) return
 
         const mappedProjects = projects.map(mapProjectFromAPI)
-        const mappedConversations = projects.flatMap((project) =>
+        const mappedProjectConversations = projects.flatMap((project) =>
           project.sessions.map((session) => mapConversationFromAPI(userId, session))
         )
+        const localRootConversations = useChatStore
+          .getState()
+          .getUserConversations()
+          .filter((conversation) => !conversation.projectId)
+          .map((conversation) => ({
+            ...conversation,
+            createdAt: parseDateValue(conversation.createdAt),
+            updatedAt: parseDateValue(conversation.updatedAt),
+          }))
+        const mergedConversations = [...mappedProjectConversations, ...localRootConversations]
 
         setProjects(mappedProjects)
 
         const preferredConversationId =
           currentConversation?.userId === userId ? currentConversation.id : null
-        replaceUserConversations(userId, mappedConversations, preferredConversationId)
+        replaceUserConversations(
+          userId,
+          mergedConversations,
+          preferredConversationId ?? undefined
+        )
 
         const nextProjectId =
-          mappedConversations.find((conversation) => conversation.id === preferredConversationId)?.projectId ??
-          currentProjectId ??
-          mappedProjects[0]?.id ??
-          null
+          mergedConversations.find((conversation) => conversation.id === preferredConversationId)?.projectId ??
+          currentProjectId
 
-        setCurrentProjectId(nextProjectId)
+        setCurrentProjectId(nextProjectId ?? null)
         hydratedUserRef.current = userId
         markHydrated(true)
       } catch (error) {

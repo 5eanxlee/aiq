@@ -34,6 +34,16 @@ from ..models.requests import UploadResponse
 from .collections import _require_ingestor
 
 logger = logging.getLogger(__name__)
+_UPLOAD_READ_CHUNK_SIZE = 1024 * 1024
+_GENERATED_ARTIFACT_KINDS = {"deep_research_report", "project_memory"}
+
+
+def _is_generated_artifact_file(file_info: FileInfo | None) -> bool:
+    if file_info is None:
+        return False
+    metadata = file_info.metadata if isinstance(file_info.metadata, dict) else {}
+    artifact_kind = metadata.get("artifact_kind")
+    return isinstance(artifact_kind, str) and artifact_kind in _GENERATED_ARTIFACT_KINDS
 
 
 def add_document_routes(router: APIRouter):
@@ -84,11 +94,24 @@ def add_document_routes(router: APIRouter):
                 original_filename = file.filename or "unknown"
                 original_filenames.append(original_filename)
                 suffix = f"_{original_filename}" if original_filename else ""
-                async with aiofiles.tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-                    content = await file.read()
-                    await tmp.write(content)
-                    temp_paths.append(tmp.name)
-                    logger.debug(f"Saved uploaded file to {tmp.name}")
+                try:
+                    async with aiofiles.tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                        temp_paths.append(tmp.name)
+                        while True:
+                            chunk = await file.read(_UPLOAD_READ_CHUNK_SIZE)
+                            if not chunk:
+                                break
+                            await tmp.write(chunk)
+                        logger.debug("Saved uploaded file to %s", tmp.name)
+                finally:
+                    try:
+                        await file.close()
+                    except Exception as close_error:
+                        logger.warning(
+                            "Failed to close upload handle for %s: %s",
+                            original_filename,
+                            close_error,
+                        )
 
             # Submit ingestion job (job will clean up temp files after processing)
             # Pass original filenames so file_details uses correct names
@@ -130,6 +153,12 @@ def add_document_routes(router: APIRouter):
                     pass
             logger.error(f"Failed to upload documents: {e}")
             raise HTTPException(status_code=500, detail=str(e))
+        finally:
+            for file in files:
+                try:
+                    await file.close()
+                except Exception:
+                    pass
 
     @router.get(
         "/v1/collections/{collection_name}/documents",
@@ -150,7 +179,7 @@ def add_document_routes(router: APIRouter):
             raise HTTPException(status_code=404, detail=f"Collection '{collection_name}' not found")
 
         try:
-            return ingestor.list_files(collection_name)
+            return [file_info for file_info in ingestor.list_files(collection_name) if not _is_generated_artifact_file(file_info)]
         except Exception as e:
             logger.error(f"Failed to list documents: {e}")
             raise HTTPException(status_code=500, detail=str(e))

@@ -4,8 +4,8 @@
 /**
  * SessionsPanel Component
  *
- * Left panel displaying session history with new session and delete all buttons.
- * Slides in from the left and overlays content.
+ * Left sidebar displaying chats and projects. In project mode the panel
+ * switches to a ChatGPT-style `Chats | Sources` split.
  */
 
 'use client'
@@ -14,18 +14,28 @@ import {
   type FC,
   type KeyboardEvent,
   useCallback,
-  useMemo,
-  useState,
-  useRef,
   useEffect,
+  useMemo,
+  useRef,
+  useState,
 } from 'react'
-import { Flex, Text, Button, SidePanel } from '@/adapters/ui'
-import { Chat, Edit, Trash, Plus, Search, LoadingSpinner } from '@/adapters/ui/icons'
+import { Flex, Text, Button, SidePanel, SegmentedControl } from '@/adapters/ui'
+import {
+  Chat,
+  Close,
+  Edit,
+  Trash,
+  Plus,
+  Search,
+  LoadingSpinner,
+  ChevronLeft,
+} from '@/adapters/ui/icons'
 import { useLayoutStore } from '../store'
 import { useChatStore } from '@/features/chat'
 import { checkStorageHealth } from '@/features/chat/lib/storage-manager'
 import { DeleteSessionConfirmationModal } from './DeleteSessionConfirmationModal'
 import { DeleteAllSessionsConfirmationModal } from './DeleteAllSessionsConfirmationModal'
+import { FileSourcesTab } from './FileSourcesTab'
 
 interface Session {
   id: string
@@ -43,12 +53,10 @@ interface ProjectItem {
 interface SessionsPanelProps {
   /** List of projects to display */
   projects?: ProjectItem[]
-  /** Whether standalone scope is selected */
-  isStandaloneScope?: boolean
-  /** Callback when standalone scope is selected */
-  onSelectStandalone?: () => void
   /** Currently selected project ID */
   selectedProjectId?: string
+  /** Callback when returning to the root chats view */
+  onSelectRoot?: () => void
   /** Callback when a project is selected */
   onSelectProject?: (projectId: string) => void
   /** Callback when new project is clicked */
@@ -57,31 +65,26 @@ interface SessionsPanelProps {
   onDeleteProject?: (projectId: string) => void
   /** Callback when a project is renamed */
   onRenameProject?: (projectId: string, newTitle: string) => void
-  /** List of sessions to display */
+  /** List of chats to display for the active context */
   sessions?: Session[]
-  /** Currently selected session ID */
+  /** Currently selected chat ID */
   selectedSessionId?: string
-  /** Callback when a session is selected */
+  /** Callback when a chat is selected */
   onSelectSession?: (sessionId: string) => void
-  /** Callback when new session is clicked */
+  /** Callback when new chat is clicked */
   onNewSession?: () => void
-  /** Callback when a session is deleted */
+  /** Callback when a chat is deleted */
   onDeleteSession?: (sessionId: string) => void
-  /** Callback when all sessions are deleted */
+  /** Callback when all chats are deleted */
   onDeleteAllSessions?: () => void
-  /** Callback when a session is renamed */
+  /** Callback when a chat is renamed */
   onRenameSession?: (sessionId: string, newTitle: string) => void
 }
 
-/**
- * Sessions panel with history grouped by date.
- * Opens from the left side of the screen.
- */
 export const SessionsPanel: FC<SessionsPanelProps> = ({
   projects = [],
-  isStandaloneScope = false,
-  onSelectStandalone,
   selectedProjectId,
+  onSelectRoot,
   onSelectProject,
   onNewProject,
   onDeleteProject,
@@ -94,28 +97,29 @@ export const SessionsPanel: FC<SessionsPanelProps> = ({
   onDeleteAllSessions,
   onRenameSession,
 }) => {
-  const { isSessionsPanelOpen, setSessionsPanelOpen } = useLayoutStore()
+  const isSessionsPanelOpen = useLayoutStore((state) => state.isSessionsPanelOpen)
+  const setSessionsPanelOpen = useLayoutStore((state) => state.setSessionsPanelOpen)
   const isSessionBusy = useChatStore((state) => state.isSessionBusy)
   const hasAnyBusySession = useChatStore((state) => state.hasAnyBusySession)
-
-  // Navigation-specific busy check: only shallow thinking (WebSocket) and HITL prompts
-  // block session switching. Deep research runs server-side and can be reconnected,
-  // so it should NOT prevent navigation.
   const isStreaming = useChatStore((state) => state.isStreaming)
   const hasPendingInteraction = useChatStore((state) => state.pendingInteraction !== null)
-  const isNavigationBlocked = isStreaming || hasPendingInteraction
-  const [searchQuery, setSearchQuery] = useState('')
+
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
   const [deleteAllModalOpen, setDeleteAllModalOpen] = useState(false)
   const [sessionToDelete, setSessionToDelete] = useState<string | null>(null)
 
-  // Storage usage percentage — refreshes when the panel opens.
+  const isProjectMode = Boolean(selectedProjectId)
+  const selectedProject = useMemo(
+    () => projects.find((project) => project.id === selectedProjectId) ?? null,
+    [projects, selectedProjectId]
+  )
+  const isNavigationBlocked = isStreaming || hasPendingInteraction
+
   const storagePercent = useMemo(() => {
     if (!isSessionsPanelOpen) return 0
     return Math.round(checkStorageHealth().percentUsed)
   }, [isSessionsPanelOpen])
 
-  // Check if any session has active operations
   const anySessionBusy = hasAnyBusySession()
 
   const handleDeleteClick = useCallback((sessionId: string) => {
@@ -128,7 +132,7 @@ export const SessionsPanel: FC<SessionsPanelProps> = ({
       onDeleteSession?.(sessionToDelete)
       setSessionToDelete(null)
     }
-  }, [sessionToDelete, onDeleteSession])
+  }, [onDeleteSession, sessionToDelete])
 
   const handleDeleteAllClick = useCallback(() => {
     setDeleteAllModalOpen(true)
@@ -138,84 +142,66 @@ export const SessionsPanel: FC<SessionsPanelProps> = ({
     onDeleteAllSessions?.()
   }, [onDeleteAllSessions])
 
-  const handleOpenChange = useCallback(
-    (open: boolean) => {
-      setSessionsPanelOpen(open)
-    },
-    [setSessionsPanelOpen]
-  )
-
   const handleClose = useCallback(() => {
     setSessionsPanelOpen(false)
   }, [setSessionsPanelOpen])
 
-  const handleNewSession = useCallback(() => {
+  const handleNewChat = useCallback(() => {
     onNewSession?.()
     handleClose()
-  }, [onNewSession, handleClose])
+  }, [handleClose, onNewSession])
 
   const handleNewProject = useCallback(() => {
     onNewProject?.()
     handleClose()
-  }, [onNewProject, handleClose])
+  }, [handleClose, onNewProject])
 
   const handleProjectClick = useCallback(
     (projectId: string) => {
       onSelectProject?.(projectId)
-      handleClose()
     },
-    [onSelectProject, handleClose]
+    [onSelectProject]
   )
 
-  const handleStandaloneClick = useCallback(() => {
-    onSelectStandalone?.()
-    handleClose()
-  }, [handleClose, onSelectStandalone])
+  const handleBackToRoot = useCallback(() => {
+    onSelectRoot?.()
+  }, [onSelectRoot])
 
-  const handleSessionClick = useCallback(
+  const handleChatClick = useCallback(
     (sessionId: string) => {
       onSelectSession?.(sessionId)
       handleClose()
     },
-    [onSelectSession, handleClose]
+    [handleClose, onSelectSession]
   )
-
-  const filteredSessions = useMemo(() => {
-    if (!searchQuery.trim()) return sessions
-    const query = searchQuery.toLowerCase()
-    return sessions.filter((s) => s.title.toLowerCase().includes(query))
-  }, [sessions, searchQuery])
-
-  // Group sessions by date
-  const groupedSessions = groupSessionsByDate(filteredSessions)
-  const scopeDeleteLabel = isStandaloneScope ? 'Delete Chats' : 'Delete Sessions'
-  const scopeDeleteTitle = isStandaloneScope
-    ? 'Delete all standalone chats'
-    : 'Delete all sessions in this project'
-  const newSessionLabel = isStandaloneScope ? 'New Chat' : 'New Session'
-  const newSessionTitle = isStandaloneScope
-    ? 'Start new standalone chat'
-    : 'Start new session'
-  const emptyStateLabel = searchQuery.trim()
-    ? 'No matching sessions'
-    : isStandaloneScope
-      ? 'No standalone chats yet'
-      : 'No sessions yet'
-  const emptyStateActionLabel = isStandaloneScope ? 'Start a new chat' : 'Start a new session'
 
   return (
     <SidePanel
-      className="bg-surface-base top-[var(--header-height)] h-[calc(100vh-var(--header-height))] w-[406px] rounded-r-2xl"
+      className="bg-surface-base top-[var(--header-height)] h-[calc(100vh-var(--header-height))] w-[320px] rounded-r-2xl"
       open={isSessionsPanelOpen}
-      onOpenChange={handleOpenChange}
       side="left"
       bordered
+      hideCloseButton
       closeOnClickOutside={false}
-      forceMount
+      onEscapeKeyDown={(event) => {
+        event.preventDefault()
+        handleClose()
+      }}
       slotHeading={
-        <Flex align="center" gap="2">
-          <Chat />
-          Sessions
+        <Flex align="center" justify="between" gap="2" className="w-full">
+          <Flex align="center" gap="2">
+            <Chat />
+            Chats
+          </Flex>
+          <Button
+            kind="tertiary"
+            size="tiny"
+            onClick={handleClose}
+            aria-label="Close chats sidebar"
+            title="Close chats sidebar"
+          >
+            <Close className="h-4 w-4" />
+          </Button>
         </Flex>
       }
       slotFooter={
@@ -224,162 +210,45 @@ export const SessionsPanel: FC<SessionsPanelProps> = ({
             Using {storagePercent}% of browser storage quota
           </Text>
           <Text kind="body/regular/xs" className="text-subtle">
-            Note: Sessions and files are saved for a limited time before automatic deletion.
+            Chats and files are saved for a limited time before automatic deletion.
           </Text>
         </Flex>
       }
     >
-      {/* Scope actions */}
-      <Flex align="center" justify="between" gap="2" className="mb-4">
-        <Button
-          kind="tertiary"
-          size="small"
-          color="danger"
-          onClick={handleDeleteAllClick}
-          disabled={anySessionBusy}
-          aria-label={
-            anySessionBusy
-              ? `${scopeDeleteLabel} (disabled during active operations)`
-              : scopeDeleteLabel
-          }
-          title={
-            anySessionBusy
-              ? 'Cannot delete while operations are in progress'
-              : scopeDeleteTitle
-          }
-        >
-          <Flex align="center" gap="1">
-            <Trash className="h-4 w-4" />
-            <Text kind="label/regular/sm">{scopeDeleteLabel}</Text>
-          </Flex>
-        </Button>
-        <Flex align="center" gap="2">
-          <Button
-            kind="tertiary"
-            size="small"
-            onClick={handleNewProject}
-            disabled={isNavigationBlocked}
-            aria-label={
-              isNavigationBlocked
-                ? 'Start new project (disabled during active operations)'
-                : 'Start new project'
-            }
-            title={
-              isNavigationBlocked
-                ? 'Cannot create a new project while the current session is active'
-                : 'Start new project'
-            }
-          >
-            <Flex align="center" gap="1">
-              <Plus className="h-4 w-4" />
-              <Text kind="label/regular/sm">New Project</Text>
-            </Flex>
-          </Button>
-          <Button
-            kind="tertiary"
-            size="small"
-            onClick={handleNewSession}
-            disabled={isNavigationBlocked}
-            aria-label={
-              isNavigationBlocked
-                ? `${newSessionTitle} (disabled during active operations)`
-                : newSessionTitle
-            }
-            title={
-              isNavigationBlocked
-                ? 'Cannot create new session while current session is active'
-                : newSessionTitle
-            }
-          >
-            <Flex align="center" gap="1">
-              <Plus className="h-4 w-4" />
-              <Text kind="label/regular/sm">{newSessionLabel}</Text>
-            </Flex>
-          </Button>
-        </Flex>
-      </Flex>
-
-      {/* Scope */}
-      <Flex direction="col" gap="2" className="mb-4">
-        <Text kind="label/semibold/xs" className="text-subtle uppercase">
-          Chat Scope
-        </Text>
-        <ScopeRow
-          label="Standalone Chat"
-          description="No shared project files"
-          isSelected={isStandaloneScope}
-          isBusy={isNavigationBlocked}
-          onSelect={handleStandaloneClick}
+      {isProjectMode ? (
+        <ProjectModeView
+          projectTitle={selectedProject?.title ?? 'Project'}
+          sessions={sessions}
+          selectedSessionId={selectedSessionId}
+          isNavigationBlocked={isNavigationBlocked}
+          anySessionBusy={anySessionBusy}
+          onBackToRoot={handleBackToRoot}
+          onDeleteAllChats={handleDeleteAllClick}
+          onNewChat={handleNewChat}
+          onSelectChat={handleChatClick}
+          onDeleteChat={handleDeleteClick}
+          onRenameChat={onRenameSession}
+          isSessionBusy={isSessionBusy}
         />
-      </Flex>
-
-      {/* Projects */}
-      <Flex direction="col" gap="2" className="mb-4">
-        <Text kind="label/semibold/xs" className="text-subtle uppercase">
-          Projects
-        </Text>
-        {projects.map((project) => (
-          <ProjectRow
-            key={project.id}
-            project={project}
-            isSelected={selectedProjectId === project.id}
-            isBusy={isNavigationBlocked}
-            isMutating={anySessionBusy}
-            onSelect={handleProjectClick}
-            onDelete={onDeleteProject}
-            onRename={onRenameProject}
-          />
-        ))}
-      </Flex>
-
-      {/* Search */}
-      <div className="relative mb-4">
-        <Search className="text-subtle pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2" />
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search sessions..."
-          className="bg-surface-base border-base text-primary placeholder:text-subtle focus:border-accent-primary h-9 w-full rounded-md border pl-8 pr-3 text-sm outline-none"
-          aria-label="Search sessions"
+      ) : (
+        <RootModeView
+          projects={projects}
+          sessions={sessions}
+          selectedSessionId={selectedSessionId}
+          isNavigationBlocked={isNavigationBlocked}
+          anySessionBusy={anySessionBusy}
+          onDeleteAllChats={handleDeleteAllClick}
+          onNewProject={handleNewProject}
+          onNewChat={handleNewChat}
+          onSelectChat={handleChatClick}
+          onDeleteChat={handleDeleteClick}
+          onRenameChat={onRenameSession}
+          onSelectProject={handleProjectClick}
+          onDeleteProject={onDeleteProject}
+          onRenameProject={onRenameProject}
+          isSessionBusy={isSessionBusy}
         />
-      </div>
-
-      {/* Session List */}
-      <Flex direction="col" className="flex-1 overflow-y-auto">
-        {Object.entries(groupedSessions).map(([dateLabel, dateSessions]) => (
-          <Flex key={dateLabel} direction="col" gap="2" className="mb-4">
-            <Text kind="label/semibold/xs" className="text-subtle uppercase">
-              {dateLabel}
-            </Text>
-            {dateSessions.map((session) => (
-              <SessionItem
-                key={session.id}
-                session={session}
-                isSelected={selectedSessionId === session.id}
-                isBusy={isNavigationBlocked}
-                isSessionActive={isSessionBusy(session.id)}
-                onSelect={handleSessionClick}
-                onDelete={handleDeleteClick}
-                onRename={onRenameSession}
-              />
-            ))}
-          </Flex>
-        ))}
-
-        {filteredSessions.length === 0 && (
-          <Flex direction="col" align="center" justify="center" className="flex-1 py-8">
-            <Text kind="body/regular/sm" className="text-subtle">
-              {emptyStateLabel}
-            </Text>
-            {!searchQuery.trim() && (
-              <Button kind="secondary" size="small" onClick={handleNewSession} className="mt-4">
-                {emptyStateActionLabel}
-              </Button>
-            )}
-          </Flex>
-        )}
-      </Flex>
+      )}
 
       <DeleteSessionConfirmationModal
         open={deleteModalOpen}
@@ -396,23 +265,387 @@ export const SessionsPanel: FC<SessionsPanelProps> = ({
   )
 }
 
-/**
- * SessionItem Component
- *
- * Individual session item with hover-reveal edit/delete icons and inline rename.
- */
-interface SessionItemProps {
-  session: Session
-  isSelected: boolean
-  /** Navigation block: true when shallow thinking (WS) or HITL prompt is pending.
-   *  Deep research does NOT block navigation since it runs server-side. */
-  isBusy?: boolean
-  /** Per-session block: true when this specific session has active deep research */
-  isSessionActive?: boolean
-  onSelect?: (sessionId: string) => void
-  onDelete?: (sessionId: string) => void
-  onRename?: (sessionId: string, newTitle: string) => void
+interface RootModeViewProps {
+  projects: ProjectItem[]
+  sessions: Session[]
+  selectedSessionId?: string
+  isNavigationBlocked: boolean
+  anySessionBusy: boolean
+  onDeleteAllChats: () => void
+  onNewProject: () => void
+  onNewChat: () => void
+  onSelectChat: (sessionId: string) => void
+  onDeleteChat: (sessionId: string) => void
+  onRenameChat?: (sessionId: string, newTitle: string) => void
+  onSelectProject: (projectId: string) => void
+  onDeleteProject?: (projectId: string) => void
+  onRenameProject?: (projectId: string, newTitle: string) => void
+  isSessionBusy: (conversationId: string) => boolean
 }
+
+const RootModeView: FC<RootModeViewProps> = ({
+  projects,
+  sessions,
+  selectedSessionId,
+  isNavigationBlocked,
+  anySessionBusy,
+  onDeleteAllChats,
+  onNewProject,
+  onNewChat,
+  onSelectChat,
+  onDeleteChat,
+  onRenameChat,
+  onSelectProject,
+  onDeleteProject,
+  onRenameProject,
+  isSessionBusy,
+}) => {
+  const [searchQuery, setSearchQuery] = useState('')
+  const filteredSessions = useMemo(() => filterSessions(sessions, searchQuery), [sessions, searchQuery])
+  const groupedSessions = useMemo(
+    () => groupSessionsByDate(filteredSessions),
+    [filteredSessions]
+  )
+  const emptyStateLabel = searchQuery.trim() ? 'No matching chats' : 'No chats yet'
+
+  return (
+    <Flex direction="col" className="h-full">
+      <Flex direction="col" gap="2" className="mb-4">
+        <Button
+          kind="primary"
+          color="brand"
+          size="small"
+          onClick={onNewChat}
+          disabled={isNavigationBlocked}
+          className="w-full"
+          title={
+            isNavigationBlocked
+              ? 'Cannot create a new chat while the current chat is active'
+              : 'New chat'
+          }
+        >
+          <Flex align="center" justify="center" gap="1" className="w-full">
+            <Plus className="h-4 w-4" />
+            <Text kind="label/regular/sm">New Chat</Text>
+          </Flex>
+        </Button>
+
+        <Button
+          kind="tertiary"
+          size="small"
+          onClick={onNewProject}
+          disabled={isNavigationBlocked}
+          className="w-full"
+          title={
+            isNavigationBlocked
+              ? 'Cannot create a project while the current chat is active'
+              : 'New project'
+          }
+        >
+          <Flex align="center" justify="center" gap="1" className="w-full">
+            <Plus className="h-4 w-4" />
+            <Text kind="label/regular/sm">New Project</Text>
+          </Flex>
+        </Button>
+
+        <Button
+          kind="tertiary"
+          size="small"
+          color="danger"
+          onClick={onDeleteAllChats}
+          disabled={anySessionBusy}
+          className="w-full"
+          aria-label={
+            anySessionBusy ? 'Delete chats (disabled during active operations)' : 'Delete chats'
+          }
+          title={
+            anySessionBusy
+              ? 'Cannot delete chats while operations are in progress'
+              : 'Delete chats'
+          }
+        >
+          <Flex align="center" justify="center" gap="1" className="w-full">
+            <Trash className="h-4 w-4" />
+            <Text kind="label/regular/sm">Delete Chats</Text>
+          </Flex>
+        </Button>
+      </Flex>
+
+      <SearchInput
+        value={searchQuery}
+        onChange={setSearchQuery}
+        placeholder="Search chats..."
+        ariaLabel="Search chats"
+      />
+
+      <Flex direction="col" gap="4" className="flex-1 min-h-0 overflow-y-auto">
+        <SectionHeader label="Chats" count={filteredSessions.length} />
+        <ChatList
+          groupedSessions={groupedSessions}
+          filteredSessions={filteredSessions}
+          selectedSessionId={selectedSessionId}
+          isNavigationBlocked={isNavigationBlocked}
+          emptyStateLabel={emptyStateLabel}
+          emptyStateActionLabel="Start a new chat"
+          onNewChat={onNewChat}
+          onSelectChat={onSelectChat}
+          onDeleteChat={onDeleteChat}
+          onRenameChat={onRenameChat}
+          isSessionBusy={isSessionBusy}
+        />
+
+        <Flex direction="col" gap="2" className="pb-2">
+          <SectionHeader label="Projects" count={projects.length} />
+          {projects.map((project) => (
+            <ProjectRow
+              key={project.id}
+              project={project}
+              isSelected={false}
+              isBusy={isNavigationBlocked}
+              isMutating={anySessionBusy}
+              onSelect={onSelectProject}
+              onDelete={onDeleteProject}
+              onRename={onRenameProject}
+            />
+          ))}
+        </Flex>
+      </Flex>
+    </Flex>
+  )
+}
+
+interface ProjectModeViewProps {
+  projectTitle: string
+  sessions: Session[]
+  selectedSessionId?: string
+  isNavigationBlocked: boolean
+  anySessionBusy: boolean
+  onBackToRoot: () => void
+  onDeleteAllChats: () => void
+  onNewChat: () => void
+  onSelectChat: (sessionId: string) => void
+  onDeleteChat: (sessionId: string) => void
+  onRenameChat?: (sessionId: string, newTitle: string) => void
+  isSessionBusy: (conversationId: string) => boolean
+}
+
+const ProjectModeView: FC<ProjectModeViewProps> = ({
+  projectTitle,
+  sessions,
+  selectedSessionId,
+  isNavigationBlocked,
+  anySessionBusy,
+  onBackToRoot,
+  onDeleteAllChats,
+  onNewChat,
+  onSelectChat,
+  onDeleteChat,
+  onRenameChat,
+  isSessionBusy,
+}) => {
+  const [projectView, setProjectView] = useState<'chats' | 'sources'>('chats')
+  const [searchQuery, setSearchQuery] = useState('')
+  const filteredSessions = useMemo(() => filterSessions(sessions, searchQuery), [sessions, searchQuery])
+  const groupedSessions = useMemo(
+    () => groupSessionsByDate(filteredSessions),
+    [filteredSessions]
+  )
+  const emptyStateLabel = searchQuery.trim()
+    ? 'No matching chats'
+    : 'No chats in this project yet'
+
+  return (
+    <Flex direction="col" className="h-full">
+      <Flex align="center" gap="2" className="mb-4">
+        <Button kind="tertiary" size="small" onClick={onBackToRoot} title="Back to chats">
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+        <Flex direction="col" gap="0.5" className="min-w-0 flex-1">
+          <Text kind="label/semibold/sm" className="truncate text-primary" title={projectTitle}>
+            {projectTitle}
+          </Text>
+          <Text kind="body/regular/xs" className="text-subtle">
+            Project
+          </Text>
+        </Flex>
+      </Flex>
+
+    <SegmentedControl
+      value={projectView}
+      onValueChange={(value) => setProjectView(value as 'chats' | 'sources')}
+        size="small"
+        className="mb-4 w-full"
+        items={[
+          { value: 'chats', children: 'Chats' },
+          { value: 'sources', children: 'Sources' },
+        ]}
+      />
+
+      {projectView === 'sources' ? (
+        <FileSourcesTab />
+      ) : (
+        <Flex direction="col" className="flex-1 min-h-0">
+          <Flex direction="col" gap="2" className="mb-4">
+            <Button
+              kind="primary"
+              color="brand"
+              size="small"
+              onClick={onNewChat}
+              disabled={isNavigationBlocked}
+              className="w-full"
+              title={
+                isNavigationBlocked
+                  ? 'Cannot create a new chat while the current chat is active'
+                  : 'New chat in this project'
+              }
+            >
+              <Flex align="center" justify="center" gap="1" className="w-full">
+                <Plus className="h-4 w-4" />
+                <Text kind="label/regular/sm">New Chat</Text>
+              </Flex>
+            </Button>
+
+            <Button
+              kind="tertiary"
+              size="small"
+              color="danger"
+              onClick={onDeleteAllChats}
+              disabled={anySessionBusy}
+              className="w-full"
+              title={
+                anySessionBusy
+                  ? 'Cannot delete chats while operations are in progress'
+                  : 'Delete chats in this project'
+              }
+            >
+              <Flex align="center" justify="center" gap="1" className="w-full">
+                <Trash className="h-4 w-4" />
+                <Text kind="label/regular/sm">Delete Chats</Text>
+              </Flex>
+            </Button>
+          </Flex>
+
+          <SearchInput
+            value={searchQuery}
+            onChange={setSearchQuery}
+            placeholder="Search project chats..."
+            ariaLabel="Search project chats"
+          />
+
+          <SectionHeader label="Chats" count={filteredSessions.length} />
+          <ChatList
+            groupedSessions={groupedSessions}
+            filteredSessions={filteredSessions}
+            selectedSessionId={selectedSessionId}
+            isNavigationBlocked={isNavigationBlocked}
+            emptyStateLabel={emptyStateLabel}
+            emptyStateActionLabel="Start a project chat"
+            onNewChat={onNewChat}
+            onSelectChat={onSelectChat}
+            onDeleteChat={onDeleteChat}
+            onRenameChat={onRenameChat}
+            isSessionBusy={isSessionBusy}
+          />
+        </Flex>
+      )}
+    </Flex>
+  )
+}
+
+interface SearchInputProps {
+  value: string
+  onChange: (value: string) => void
+  placeholder: string
+  ariaLabel: string
+}
+
+const SearchInput: FC<SearchInputProps> = ({ value, onChange, placeholder, ariaLabel }) => (
+  <div className="relative mb-4">
+    <Search className="text-subtle pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2" />
+    <input
+      type="text"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      placeholder={placeholder}
+      className="bg-surface-base border-base text-primary placeholder:text-subtle focus:border-accent-primary h-9 w-full rounded-md border pl-8 pr-3 text-sm outline-none"
+      aria-label={ariaLabel}
+    />
+  </div>
+)
+
+const SectionHeader: FC<{ label: string; count?: number }> = ({ label, count }) => (
+  <Flex align="center" gap="2">
+    <Text kind="label/semibold/xs" className="text-subtle uppercase">
+      {label}
+    </Text>
+    {typeof count === 'number' && (
+      <Text kind="body/regular/xs" className="text-subtle">
+        {count}
+      </Text>
+    )}
+  </Flex>
+)
+
+interface ChatListProps {
+  groupedSessions: Record<string, Session[]>
+  filteredSessions: Session[]
+  selectedSessionId?: string
+  isNavigationBlocked: boolean
+  emptyStateLabel: string
+  emptyStateActionLabel: string
+  onNewChat: () => void
+  onSelectChat: (sessionId: string) => void
+  onDeleteChat: (sessionId: string) => void
+  onRenameChat?: (sessionId: string, newTitle: string) => void
+  isSessionBusy: (conversationId: string) => boolean
+}
+
+const ChatList: FC<ChatListProps> = ({
+  groupedSessions,
+  filteredSessions,
+  selectedSessionId,
+  isNavigationBlocked,
+  emptyStateLabel,
+  emptyStateActionLabel,
+  onNewChat,
+  onSelectChat,
+  onDeleteChat,
+  onRenameChat,
+  isSessionBusy,
+}) => (
+  <Flex direction="col" className="flex-1 min-h-0 overflow-y-auto">
+    {Object.entries(groupedSessions).map(([dateLabel, dateSessions]) => (
+      <Flex key={dateLabel} direction="col" gap="2" className="mb-4">
+        <Text kind="label/semibold/xs" className="text-subtle uppercase">
+          {dateLabel}
+        </Text>
+        {dateSessions.map((session) => (
+          <SessionItem
+            key={session.id}
+            session={session}
+            isSelected={selectedSessionId === session.id}
+            isBusy={isNavigationBlocked}
+            isSessionActive={isSessionBusy(session.id)}
+            onSelect={onSelectChat}
+            onDelete={onDeleteChat}
+            onRename={onRenameChat}
+          />
+        ))}
+      </Flex>
+    ))}
+
+    {filteredSessions.length === 0 && (
+      <Flex direction="col" align="center" justify="center" className="flex-1 py-8 text-center">
+        <Text kind="body/regular/sm" className="text-subtle">
+          {emptyStateLabel}
+        </Text>
+        <Button kind="secondary" size="small" onClick={onNewChat} className="mt-4">
+          {emptyStateActionLabel}
+        </Button>
+      </Flex>
+    )}
+  </Flex>
+)
 
 interface ProjectRowProps {
   project: ProjectItem
@@ -424,62 +657,14 @@ interface ProjectRowProps {
   onRename?: (projectId: string, newTitle: string) => void
 }
 
-interface ScopeRowProps {
-  label: string
-  description?: string
+interface SessionItemProps {
+  session: Session
   isSelected: boolean
   isBusy?: boolean
-  onSelect?: () => void
-}
-
-const ScopeRow: FC<ScopeRowProps> = ({
-  label,
-  description,
-  isSelected,
-  isBusy = false,
-  onSelect,
-}) => {
-  const handleSelect = useCallback(() => {
-    if (!isBusy) {
-      onSelect?.()
-    }
-  }, [isBusy, onSelect])
-
-  return (
-    <div
-      role="button"
-      tabIndex={isBusy ? -1 : 0}
-      onClick={handleSelect}
-      onKeyDown={(e) => {
-        if ((e.key === 'Enter' || e.key === ' ') && !isBusy) {
-          e.preventDefault()
-          handleSelect()
-        }
-      }}
-      aria-label={`${label}${description ? ` (${description})` : ''}`}
-      className={`
-        focus-visible:ring-brand flex min-h-10 w-full items-center rounded-md border p-2 text-left
-        outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset
-        ${isBusy ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}
-        ${
-          isSelected
-            ? 'bg-surface-raised border-accent-primary border'
-            : 'border-base hover:bg-surface-raised-50 bg-transparent'
-        }
-      `}
-    >
-      <Flex direction="col" gap="1" className="min-w-0 flex-1">
-        <Text kind="body/regular/sm" className="text-primary truncate">
-          {label}
-        </Text>
-        {description && (
-          <Text kind="body/regular/xs" className="text-subtle truncate">
-            {description}
-          </Text>
-        )}
-      </Flex>
-    </div>
-  )
+  isSessionActive?: boolean
+  onSelect?: (sessionId: string) => void
+  onDelete?: (sessionId: string) => void
+  onRename?: (sessionId: string, newTitle: string) => void
 }
 
 const ProjectRow: FC<ProjectRowProps> = ({
@@ -522,12 +707,11 @@ const ProjectRow: FC<ProjectRowProps> = ({
       role="button"
       tabIndex={isBusy ? -1 : 0}
       onClick={handleClick}
-      onKeyDown={(e) => e.key === 'Enter' && !isEditing && !isBusy && handleClick()}
+      onKeyDown={(event) => event.key === 'Enter' && !isEditing && !isBusy && handleClick()}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       className={`
-        focus-visible:ring-brand group flex h-10 w-full items-center gap-2
-        rounded-md border p-2 text-left
+        focus-visible:ring-brand group flex h-10 w-full items-center gap-2 rounded-md border p-2 text-left
         outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset
         ${isBusy ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}
         ${
@@ -542,23 +726,20 @@ const ProjectRow: FC<ProjectRowProps> = ({
           ref={inputRef}
           type="text"
           value={editValue}
-          onChange={(e) => setEditValue(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault()
+          onChange={(event) => setEditValue(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
               handleSaveRename()
-            } else if (e.key === 'Escape') {
-              e.preventDefault()
+            } else if (event.key === 'Escape') {
+              event.preventDefault()
               setEditValue(project.title)
               setIsEditing(false)
             }
           }}
           onBlur={handleSaveRename}
-          onClick={(e) => e.stopPropagation()}
-          className="
-            bg-surface-base border-accent-primary text-primary h-8 min-w-0 flex-1 rounded border
-            px-2 py-1 text-sm outline-none
-          "
+          onClick={(event) => event.stopPropagation()}
+          className="bg-surface-base border-accent-primary text-primary h-8 min-w-0 flex-1 rounded border px-2 py-1 text-sm outline-none"
           aria-label="Edit project title"
         />
       ) : (
@@ -571,8 +752,8 @@ const ProjectRow: FC<ProjectRowProps> = ({
               <Button
                 kind="tertiary"
                 size="tiny"
-                onClick={(e) => {
-                  e.stopPropagation()
+                onClick={(event) => {
+                  event.stopPropagation()
                   setEditValue(project.title)
                   setIsEditing(true)
                 }}
@@ -585,8 +766,8 @@ const ProjectRow: FC<ProjectRowProps> = ({
                 kind="tertiary"
                 size="tiny"
                 color="danger"
-                onClick={(e) => {
-                  e.stopPropagation()
+                onClick={(event) => {
+                  event.stopPropagation()
                   onDelete?.(project.id)
                 }}
                 disabled={isBusy || isMutating}
@@ -616,7 +797,6 @@ const SessionItem: FC<SessionItemProps> = ({
   const [editValue, setEditValue] = useState(session.title)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // Focus input when entering edit mode
   useEffect(() => {
     if (isEditing && inputRef.current) {
       inputRef.current.focus()
@@ -630,30 +810,13 @@ const SessionItem: FC<SessionItemProps> = ({
     }
   }, [isEditing, isBusy, onSelect, session.id])
 
-  const handleEditClick = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation()
-      setEditValue(session.title)
-      setIsEditing(true)
-    },
-    [session.title]
-  )
-
-  const handleDeleteClick = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation()
-      onDelete?.(session.id)
-    },
-    [onDelete, session.id]
-  )
-
   const handleSaveRename = useCallback(() => {
     const trimmedValue = editValue.trim()
     if (trimmedValue && trimmedValue !== session.title) {
       onRename?.(session.id, trimmedValue)
     }
     setIsEditing(false)
-  }, [editValue, session.id, session.title, onRename])
+  }, [editValue, onRename, session.id, session.title])
 
   const handleCancelRename = useCallback(() => {
     setEditValue(session.title)
@@ -661,37 +824,28 @@ const SessionItem: FC<SessionItemProps> = ({
   }, [session.title])
 
   const handleKeyDown = useCallback(
-    (e: KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === 'Enter') {
-        e.preventDefault()
+    (event: KeyboardEvent<HTMLInputElement>) => {
+      if (event.key === 'Enter') {
+        event.preventDefault()
         handleSaveRename()
-      } else if (e.key === 'Escape') {
-        e.preventDefault()
+      } else if (event.key === 'Escape') {
+        event.preventDefault()
         handleCancelRename()
       }
     },
-    [handleSaveRename, handleCancelRename]
+    [handleCancelRename, handleSaveRename]
   )
-
-  const handleInputBlur = useCallback(() => {
-    handleSaveRename()
-  }, [handleSaveRename])
-
-  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setEditValue(e.target.value)
-  }, [])
 
   return (
     <div
       role="button"
       tabIndex={isBusy ? -1 : 0}
       onClick={handleClick}
-      onKeyDown={(e) => e.key === 'Enter' && !isEditing && !isBusy && handleClick()}
+      onKeyDown={(event) => event.key === 'Enter' && !isEditing && !isBusy && handleClick()}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       className={`
-        focus-visible:ring-brand group flex h-10 w-full items-center gap-2
-        rounded-md border p-2 text-left
+        focus-visible:ring-brand group flex h-10 w-full items-center gap-2 rounded-md border p-2 text-left
         outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset
         ${isBusy ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}
         ${
@@ -700,9 +854,7 @@ const SessionItem: FC<SessionItemProps> = ({
             : 'border-base hover:bg-surface-raised-50 bg-transparent'
         }
       `}
-      aria-label={
-        isBusy ? `Session: ${session.title} (processing in progress)` : `Session: ${session.title}`
-      }
+      aria-label={isBusy ? `Chat: ${session.title} (processing in progress)` : `Chat: ${session.title}`}
       aria-disabled={isBusy}
     >
       {isEditing ? (
@@ -710,19 +862,15 @@ const SessionItem: FC<SessionItemProps> = ({
           ref={inputRef}
           type="text"
           value={editValue}
-          onChange={handleInputChange}
+          onChange={(event) => setEditValue(event.target.value)}
           onKeyDown={handleKeyDown}
-          onBlur={handleInputBlur}
-          onClick={(e) => e.stopPropagation()}
-          className="
-            bg-surface-base border-accent-primary text-primary h-8 min-w-0 flex-1 rounded border
-            px-2 py-1 text-sm outline-none
-          "
-          aria-label="Edit session title"
+          onBlur={handleSaveRename}
+          onClick={(event) => event.stopPropagation()}
+          className="bg-surface-base border-accent-primary text-primary h-8 min-w-0 flex-1 rounded border px-2 py-1 text-sm outline-none"
+          aria-label="Edit chat title"
         />
       ) : (
         <>
-          {/* Loading indicator for active deep research */}
           {session.hasActiveDeepResearch && (
             <LoadingSpinner
               className="text-accent-primary shrink-0"
@@ -734,21 +882,22 @@ const SessionItem: FC<SessionItemProps> = ({
             {session.title}
           </Text>
 
-          {/* Action icons - shown on hover */}
           {isHovered && (
             <Flex align="center" gap="1" className="shrink-0">
               <Button
                 kind="tertiary"
                 size="tiny"
-                onClick={handleEditClick}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  setEditValue(session.title)
+                  setIsEditing(true)
+                }}
                 disabled={isBusy || isSessionActive}
-                aria-label={
-                  isBusy || isSessionActive ? 'Rename session (disabled)' : 'Rename session'
-                }
+                aria-label={isBusy || isSessionActive ? 'Rename chat (disabled)' : 'Rename chat'}
                 title={
                   isBusy || isSessionActive
                     ? 'Cannot rename while operations are in progress'
-                    : 'Rename session'
+                    : 'Rename chat'
                 }
               >
                 <Edit height={16} width={16} />
@@ -757,15 +906,16 @@ const SessionItem: FC<SessionItemProps> = ({
                 kind="tertiary"
                 size="tiny"
                 color="danger"
-                onClick={handleDeleteClick}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onDelete?.(session.id)
+                }}
                 disabled={isBusy || isSessionActive}
-                aria-label={
-                  isBusy || isSessionActive ? 'Delete session (disabled)' : 'Delete session'
-                }
+                aria-label={isBusy || isSessionActive ? 'Delete chat (disabled)' : 'Delete chat'}
                 title={
                   isBusy || isSessionActive
                     ? 'Cannot delete while operations are in progress'
-                    : 'Delete session'
+                    : 'Delete chat'
                 }
               >
                 <Trash height={16} width={16} />
@@ -778,9 +928,6 @@ const SessionItem: FC<SessionItemProps> = ({
   )
 }
 
-/**
- * Groups sessions by relative date labels (Today, Yesterday, or date string)
- */
 const groupSessionsByDate = (sessions: Session[]): Record<string, Session[]> => {
   const groups: Record<string, Session[]> = {}
   const today = new Date()
@@ -812,10 +959,16 @@ const groupSessionsByDate = (sessions: Session[]): Record<string, Session[]> => 
   return groups
 }
 
-const isSameDay = (d1: Date, d2: Date): boolean => {
-  return (
-    d1.getFullYear() === d2.getFullYear() &&
-    d1.getMonth() === d2.getMonth() &&
-    d1.getDate() === d2.getDate()
-  )
+const filterSessions = (sessions: Session[], searchQuery: string): Session[] => {
+  if (!searchQuery.trim()) {
+    return sessions
+  }
+
+  const query = searchQuery.toLowerCase()
+  return sessions.filter((session) => session.title.toLowerCase().includes(query))
 }
+
+const isSameDay = (left: Date, right: Date): boolean =>
+  left.getFullYear() === right.getFullYear() &&
+  left.getMonth() === right.getMonth() &&
+  left.getDate() === right.getDate()

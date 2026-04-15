@@ -44,10 +44,20 @@ interface ResearchPanelProps {
 /**
  * Research panel with tabbed content (Thinking, Citations, Report).
  * Opens from the right side of the screen, pushing the chat area.
- * Takes 60% of the screen width when open.
+ * Starts at 60% width and can be expanded by dragging its left edge.
  */
 export const ResearchPanel: FC<ResearchPanelProps> = ({ children, isAuthenticated = false }) => {
-  const { rightPanel, researchPanelTab, setResearchPanelTab, closeRightPanel, openRightPanel } = useLayoutStore()
+  const {
+    rightPanel,
+    researchPanelTab,
+    researchPanelWidthPercent,
+    isResearchPanelResizing,
+    setResearchPanelTab,
+    setResearchPanelWidthPercent,
+    setResearchPanelResizing,
+    closeRightPanel,
+    openRightPanel,
+  } = useLayoutStore()
   const isDeepResearchStreaming = useChatStore((state) => state.isDeepResearchStreaming)
   const deepResearchJobId = useChatStore((state) => state.deepResearchJobId)
   const deepResearchStreamLoaded = useChatStore((state) => state.deepResearchStreamLoaded)
@@ -60,6 +70,8 @@ export const ResearchPanel: FC<ResearchPanelProps> = ({ children, isAuthenticate
 
   const isOpen = rightPanel === 'research'
   const cancelFallbackRef = useRef<NodeJS.Timeout | null>(null)
+  const resizeCleanupRef = useRef<(() => void) | null>(null)
+  const panelShellRef = useRef<HTMLDivElement | null>(null)
   const [nowMs, setNowMs] = useState(() => Date.now())
 
   useEffect(() => {
@@ -67,7 +79,6 @@ export const ResearchPanel: FC<ResearchPanelProps> = ({ children, isAuthenticate
       return
     }
 
-    setNowMs(Date.now())
     const interval = setInterval(() => {
       setNowMs(Date.now())
     }, 1000)
@@ -91,6 +102,7 @@ export const ResearchPanel: FC<ResearchPanelProps> = ({ children, isAuthenticate
         clearTimeout(cancelFallbackRef.current)
         cancelFallbackRef.current = null
       }
+      resizeCleanupRef.current?.()
     }
   }, [])
 
@@ -189,14 +201,53 @@ export const ResearchPanel: FC<ResearchPanelProps> = ({ children, isAuthenticate
     [setResearchPanelTab, deepResearchJobId, deepResearchStreamLoaded, isDeepResearchStreaming, isStreamLoading, importStreamOnly]
   )
 
+  const handleResizeMouseDown = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (!isOpen) return
+
+    event.preventDefault()
+    const workspace = panelShellRef.current?.parentElement
+    if (!workspace) return
+
+    const updateWidth = (clientX: number) => {
+      const bounds = workspace.getBoundingClientRect()
+      const nextPercent = ((bounds.right - clientX) / bounds.width) * 100
+      setResearchPanelWidthPercent(nextPercent)
+    }
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      updateWidth(moveEvent.clientX)
+    }
+
+    const cleanup = () => {
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', cleanup)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      setResearchPanelResizing(false)
+      if (resizeCleanupRef.current === cleanup) {
+        resizeCleanupRef.current = null
+      }
+    }
+
+    resizeCleanupRef.current?.()
+    resizeCleanupRef.current = cleanup
+    setResearchPanelResizing(true)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    updateWidth(event.clientX)
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', cleanup)
+  }, [isOpen, setResearchPanelResizing, setResearchPanelWidthPercent])
+
   return (
     // Wrapper: uses flex to keep button visible while panel animates
     <div
+      ref={panelShellRef}
       className="relative h-full flex"
       style={{
-        width: isOpen ? 'calc(60% + 40px)' : '40px',
-        minWidth: isOpen ? 'calc(60% + 40px)' : '40px',
-        transition: prefersReducedMotion
+        width: isOpen ? `calc(${researchPanelWidthPercent}% + 40px)` : '40px',
+        minWidth: isOpen ? `calc(${researchPanelWidthPercent}% + 40px)` : '40px',
+        transition: prefersReducedMotion || isResearchPanelResizing
           ? 'none'
           : 'width 600ms ease-in-out, min-width 600ms ease-in-out',
       }}
@@ -232,6 +283,15 @@ export const ResearchPanel: FC<ResearchPanelProps> = ({ children, isAuthenticate
           Show Research
         </Text>
       </button>
+
+      {isOpen && (
+        <div
+          onMouseDown={handleResizeMouseDown}
+          className="absolute left-10 top-0 z-20 h-full w-1.5 -translate-x-1/2 cursor-col-resize hover:bg-primary/10 active:bg-primary/20"
+          aria-hidden="true"
+          data-testid="research-panel-resize-handle"
+        />
+      )}
 
       {/* Outer container: clips content, fills remaining space */}
       <div
@@ -289,8 +349,7 @@ export const ResearchPanel: FC<ResearchPanelProps> = ({ children, isAuthenticate
               Stop Researching
             </Button>
           </Flex>
-          <Flex align="center" gap="density-xl">
-            {/* Close button */}
+          <Flex align="center">
             <Button
               kind="tertiary"
               size="small"

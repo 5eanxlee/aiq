@@ -4,12 +4,15 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest'
 import { useChatStore } from './store'
 import type { Conversation, PendingInteraction, FileCardData } from './types'
+import { DATA_SOURCE_PREFERENCES_KEY } from '@/features/layout/lib/data-source-preferences'
 
 const STORAGE_KEY = 'aiq-chat-store'
 const mockLayoutState = vi.hoisted(() => ({
   closeRightPanel: vi.fn(),
   enabledDataSourceIds: ['web_search'],
-  availableDataSources: [{ id: 'web_search' }, { id: 'knowledge_base' }],
+  availableDataSources: [{ id: 'web_search' }, { id: 'knowledge_base' }, { id: 'paper_search' }] as
+    | Array<{ id: string }>
+    | null,
   setEnabledDataSources: vi.fn(),
 }))
 const mockDeepResearchApi = vi.hoisted(() => ({
@@ -33,10 +36,15 @@ describe('useChatStore', () => {
   beforeEach(() => {
     // Clear localStorage before each test
     localStorage.removeItem(STORAGE_KEY)
+    localStorage.removeItem(DATA_SOURCE_PREFERENCES_KEY)
     mockLayoutState.closeRightPanel.mockClear()
     mockLayoutState.setEnabledDataSources.mockClear()
     mockLayoutState.enabledDataSourceIds = ['web_search']
-    mockLayoutState.availableDataSources = [{ id: 'web_search' }, { id: 'knowledge_base' }]
+    mockLayoutState.availableDataSources = [
+      { id: 'web_search' },
+      { id: 'knowledge_base' },
+      { id: 'paper_search' },
+    ]
     mockDeepResearchApi.getJobStatus.mockReset()
     mockDeepResearchApi.cancelJob.mockReset()
     // Reset store to initial state before each test
@@ -76,6 +84,7 @@ describe('useChatStore', () => {
   afterEach(() => {
     // Clean up localStorage after each test
     localStorage.removeItem(STORAGE_KEY)
+    localStorage.removeItem(DATA_SOURCE_PREFERENCES_KEY)
   })
 
   describe('initial state', () => {
@@ -241,7 +250,7 @@ describe('useChatStore', () => {
       const conv = useChatStore.getState().createConversation()
 
       expect(conv.userId).toBe('user-1')
-      expect(conv.title).toBe('New Session')
+      expect(conv.title).toBe('New Chat')
       expect(conv.messages).toEqual([])
       expect(useChatStore.getState().currentConversation).toEqual(conv)
       expect(useChatStore.getState().conversations).toContainEqual(conv)
@@ -277,6 +286,28 @@ describe('useChatStore', () => {
       expect(state.thinkingSteps).toEqual([])
       expect(state.reportContent).toBe('')
     })
+
+    test('uses the saved data source preference for new conversations', () => {
+      localStorage.setItem(DATA_SOURCE_PREFERENCES_KEY, JSON.stringify(['paper_search']))
+      useChatStore.setState({ currentUserId: 'user-1' })
+
+      const conv = useChatStore.getState().createConversation()
+
+      expect(conv.enabledDataSourceIds).toEqual(['paper_search'])
+      expect(mockLayoutState.setEnabledDataSources).toHaveBeenCalledWith(['paper_search'])
+    })
+  })
+
+  describe('startNewSessionDraft', () => {
+    test('restores the saved data source preference for a new draft', () => {
+      localStorage.setItem(DATA_SOURCE_PREFERENCES_KEY, JSON.stringify(['paper_search']))
+      useChatStore.setState({ currentUserId: 'user-1' })
+
+      useChatStore.getState().startNewSessionDraft()
+
+      expect(mockLayoutState.setEnabledDataSources).toHaveBeenCalledWith(['paper_search'])
+      expect(useChatStore.getState().currentConversation).toBeNull()
+    })
   })
 
   describe('ensureSession', () => {
@@ -303,6 +334,19 @@ describe('useChatStore', () => {
 
       expect(result).toBeDefined()
       expect(useChatStore.getState().currentConversation).not.toBeNull()
+    })
+
+    test('uses the saved data source preference when creating a session', () => {
+      localStorage.setItem(DATA_SOURCE_PREFERENCES_KEY, JSON.stringify(['paper_search']))
+      useChatStore.setState({ currentUserId: 'user-1', currentConversation: null })
+
+      const result = useChatStore.getState().ensureSession()
+
+      expect(result).toBeDefined()
+      expect(useChatStore.getState().currentConversation?.enabledDataSourceIds).toEqual([
+        'paper_search',
+      ])
+      expect(mockLayoutState.setEnabledDataSources).toHaveBeenCalledWith(['paper_search'])
     })
 
     test('returns undefined when no user', () => {
@@ -387,6 +431,49 @@ describe('useChatStore', () => {
       expect(useChatStore.getState().thinkingSteps).toEqual([])
       expect(useChatStore.getState().reportContent).toBe('')
     })
+
+    test('restores the saved preference for legacy conversations without data source state', () => {
+      localStorage.setItem(DATA_SOURCE_PREFERENCES_KEY, JSON.stringify(['paper_search']))
+      const conv: Conversation = {
+        id: 'conv-1',
+        userId: 'user-1',
+        title: 'Conv 1',
+        messages: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }
+      useChatStore.setState({
+        currentUserId: 'user-1',
+        conversations: [conv],
+        currentConversation: null,
+      })
+
+      useChatStore.getState().selectConversation('conv-1')
+
+      expect(mockLayoutState.setEnabledDataSources).toHaveBeenCalledWith(['paper_search'])
+    })
+
+    test('preserves saved conversation sources before the source list loads', () => {
+      mockLayoutState.availableDataSources = null
+      const conv: Conversation = {
+        id: 'conv-1',
+        userId: 'user-1',
+        title: 'Conv 1',
+        messages: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        enabledDataSourceIds: ['paper_search'],
+      }
+      useChatStore.setState({
+        currentUserId: 'user-1',
+        conversations: [conv],
+        currentConversation: null,
+      })
+
+      useChatStore.getState().selectConversation('conv-1')
+
+      expect(mockLayoutState.setEnabledDataSources).toHaveBeenCalledWith(['paper_search'])
+    })
   })
 
   describe('addUserMessage', () => {
@@ -394,7 +481,7 @@ describe('useChatStore', () => {
       const conv: Conversation = {
         id: 'conv-1',
         userId: 'user-1',
-        title: 'New Session',
+        title: 'New Chat',
         messages: [],
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -416,7 +503,7 @@ describe('useChatStore', () => {
       const conv: Conversation = {
         id: 'conv-1',
         userId: 'user-1',
-        title: 'New Session',
+        title: 'New Chat',
         messages: [],
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -438,7 +525,7 @@ describe('useChatStore', () => {
       const conv: Conversation = {
         id: 'conv-1',
         userId: 'user-1',
-        title: 'New Session',
+        title: 'New Chat',
         messages: [],
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -485,7 +572,7 @@ describe('useChatStore', () => {
       const conv: Conversation = {
         id: 'conv-1',
         userId: 'user-1',
-        title: 'New Session',
+        title: 'New Chat',
         messages: [],
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -995,6 +1082,39 @@ describe('useChatStore', () => {
       useChatStore.getState().setReportContent('# Report\n\nContent here')
 
       expect(useChatStore.getState().reportContent).toBe('# Report\n\nContent here')
+    })
+
+    test('setReportContent marks matching deep research citations as cited', () => {
+      useChatStore.setState({
+        deepResearchCitations: [
+          {
+            id: 'citation-1',
+            url: 'https://example.com/article',
+            content: 'Example article',
+            timestamp: new Date(),
+            isCited: false,
+          },
+        ],
+      })
+
+      useChatStore
+        .getState()
+        .setReportContent('## Sources\n[1] Example article: https://example.com/article\n')
+
+      expect(useChatStore.getState().deepResearchCitations[0]?.isCited).toBe(true)
+    })
+
+    test('addDeepResearchCitation respects an already-loaded report when deciding cited state', () => {
+      useChatStore.setState({
+        reportContent: '## Sources\n[1] Example article: https://example.com/article\n',
+      })
+
+      useChatStore
+        .getState()
+        .addDeepResearchCitation('https://example.com/article', 'Example article', false)
+
+      expect(useChatStore.getState().deepResearchCitations).toHaveLength(1)
+      expect(useChatStore.getState().deepResearchCitations[0]?.isCited).toBe(true)
     })
 
     test('clearReportContent clears content', () => {
@@ -1557,6 +1677,43 @@ describe('useChatStore', () => {
       expect(trackingMessage?.isDeepResearchActive).toBe(false)
       expect(updatedMessages.some((m) => m.id === 'starting-banner')).toBe(false)
       expect(failureBanner).toBeTruthy()
+    })
+
+    test('keeps active job active when status lookup fails transiently', async () => {
+      mockDeepResearchApi.getJobStatus.mockRejectedValue(new Error('Failed to get job status: 500'))
+
+      const conv = createConversation([
+        {
+          id: 'tracking-msg',
+          messageType: 'agent_response',
+          deepResearchJobId: 'job-transient',
+          deepResearchJobStatus: 'running',
+          isDeepResearchActive: true,
+        },
+        {
+          id: 'starting-banner',
+          messageType: 'deep_research_banner',
+          deepResearchBannerData: { bannerType: 'starting', jobId: 'job-transient' },
+        },
+      ])
+
+      useChatStore.setState({ currentConversation: conv, conversations: [conv] })
+
+      await useChatStore.getState().reconnectToActiveJob()
+
+      const updatedMessages = useChatStore.getState().currentConversation?.messages ?? []
+      const trackingMessage = updatedMessages.find((m) => m.id === 'tracking-msg')
+      const failureBanner = updatedMessages.find(
+        (m) =>
+          m.messageType === 'deep_research_banner' &&
+          m.deepResearchBannerData?.jobId === 'job-transient' &&
+          m.deepResearchBannerData?.bannerType === 'failure'
+      )
+
+      expect(trackingMessage?.deepResearchJobStatus).toBe('running')
+      expect(trackingMessage?.isDeepResearchActive).toBe(true)
+      expect(updatedMessages.some((m) => m.id === 'starting-banner')).toBe(true)
+      expect(failureBanner).toBeFalsy()
     })
   })
 })

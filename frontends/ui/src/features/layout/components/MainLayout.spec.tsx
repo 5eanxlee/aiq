@@ -3,7 +3,7 @@
 
 import { render, screen } from '@/test-utils'
 import userEvent from '@testing-library/user-event'
-import { vi, describe, test, expect, beforeEach } from 'vitest'
+import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { MainLayout } from './MainLayout'
 
 const mockUpdateRouteUrl = vi.fn()
@@ -16,27 +16,51 @@ const mockCloseRightPanel = vi.fn()
 const mockSetCurrentProjectId = vi.fn()
 const mockUpsertProject = vi.fn()
 const mockRemoveProject = vi.fn()
+const mockPatchConversationMessage = vi.fn()
+const mockAddDeepResearchBanner = vi.fn()
+const mockPersistDeepResearchToSession = vi.fn()
+const mockCreateProject = vi.fn()
+const mockUpdateProject = vi.fn()
+const mockDeleteProject = vi.fn()
+const mockDeleteSession = vi.fn()
+const mockUpdateSession = vi.fn()
 
 let lastAppBarProps: Record<string, unknown> | null = null
 let lastSessionsPanelProps: Record<string, unknown> | null = null
+let mockRightPanel: string | null = null
+let mockResearchPanelMode: 'split' | 'full-width' = 'split'
+let mockResearchPanelWidthPercent = 60
+let mockIsResearchPanelResizing = false
 
 interface MockConversation {
   id: string
+  userId: string
   title: string
   updatedAt: string
   projectId?: string
-  messages: unknown[]
+  messages: Array<{
+    id?: string
+    messageType?: string
+    deepResearchJobId?: string | null
+    deepResearchJobStatus?: string | null
+    deepResearchDurationMs?: number | null
+    deepResearchStartedAtMs?: number | null
+  }>
 }
 
 interface MockChatState {
   currentConversation: MockConversation | null
   currentUserId: string | null
+  conversations: MockConversation[]
   getUserConversations: () => MockConversation[]
   selectConversation: typeof mockSelectConversation
   startNewSessionDraft: typeof mockStartNewSessionDraft
   deleteConversation: typeof mockDeleteConversation
   updateConversationTitle: typeof mockUpdateConversationTitle
   replaceUserConversations: typeof mockReplaceUserConversations
+  patchConversationMessage: typeof mockPatchConversationMessage
+  addDeepResearchBanner: typeof mockAddDeepResearchBanner
+  persistDeepResearchToSession: typeof mockPersistDeepResearchToSession
   isStreaming: boolean
   pendingInteraction: unknown
   isDeepResearchStreaming: boolean
@@ -46,6 +70,7 @@ interface MockChatState {
 interface MockProjectsState {
   projects: Array<{
     id: string
+    ownerId?: string
     title: string
     updatedAt: string
     knowledgeCollectionName: string
@@ -56,69 +81,79 @@ interface MockProjectsState {
   removeProject: typeof mockRemoveProject
 }
 
-const defaultProject = {
+const project = {
   id: 'project-1',
   title: 'Project Atlas',
-  updatedAt: '2026-04-08T14:00:00.000Z',
+  updatedAt: '2026-04-08T16:00:00.000Z',
   knowledgeCollectionName: 'project_atlas',
 }
 
-const standaloneConversation: MockConversation = {
-  id: 'standalone-1',
-  title: 'Standalone Session',
-  updatedAt: '2026-04-08T15:00:00.000Z',
+const rootConversation: MockConversation = {
+  id: 'root-1',
+  userId: 'user-1',
+  title: 'Root Chat',
+  updatedAt: '2026-04-08T14:00:00.000Z',
   messages: [],
 }
 
 const projectConversation: MockConversation = {
-  id: 'project-session-1',
-  title: 'Project Session',
-  updatedAt: '2026-04-08T16:00:00.000Z',
-  projectId: defaultProject.id,
+  id: 'project-1-chat',
+  userId: 'user-1',
+  title: 'Project Chat',
+  updatedAt: '2026-04-08T15:00:00.000Z',
+  projectId: project.id,
   messages: [],
 }
 
-const defaultChatState: MockChatState = {
+const getMockUserConversations = () =>
+  mockChatState.currentUserId
+    ? mockChatState.conversations.filter(
+        (conversation) => conversation.userId === mockChatState.currentUserId
+      )
+    : []
+
+let mockChatState: MockChatState = {
   currentConversation: projectConversation,
   currentUserId: 'user-1',
-  getUserConversations: () => [projectConversation],
+  conversations: [projectConversation],
+  getUserConversations: getMockUserConversations,
   selectConversation: mockSelectConversation,
   startNewSessionDraft: mockStartNewSessionDraft,
   deleteConversation: mockDeleteConversation,
   updateConversationTitle: mockUpdateConversationTitle,
   replaceUserConversations: mockReplaceUserConversations,
+  patchConversationMessage: mockPatchConversationMessage,
+  addDeepResearchBanner: mockAddDeepResearchBanner,
+  persistDeepResearchToSession: mockPersistDeepResearchToSession,
   isStreaming: false,
   pendingInteraction: null,
   isDeepResearchStreaming: false,
   deepResearchOwnerConversationId: null,
 }
 
-const defaultProjectsState: MockProjectsState = {
-  projects: [defaultProject],
-  currentProjectId: defaultProject.id,
+let mockProjectsState: MockProjectsState = {
+  projects: [project],
+  currentProjectId: project.id,
   setCurrentProjectId: mockSetCurrentProjectId,
   upsertProject: mockUpsertProject,
   removeProject: mockRemoveProject,
 }
 
-let mockChatState: MockChatState = { ...defaultChatState }
-let mockProjectsState: MockProjectsState = { ...defaultProjectsState }
-
 vi.mock('@/hooks/use-session-url', () => ({
-  useSessionUrl: vi.fn(() => ({
+  useSessionUrl: () => ({
     updateRouteUrl: mockUpdateRouteUrl,
     clearSessionUrl: vi.fn(),
-  })),
+  }),
 }))
 
 vi.mock('@/adapters/api', () => ({
-  createProjectsClient: vi.fn(() => ({
-    createProject: vi.fn(),
-    updateProject: vi.fn(),
-    deleteProject: vi.fn(),
-    deleteSession: vi.fn(),
-    updateSession: vi.fn(),
-  })),
+  createProjectsClient: () => ({
+    createProject: mockCreateProject,
+    updateProject: mockUpdateProject,
+    deleteProject: mockDeleteProject,
+    deleteSession: mockDeleteSession,
+    updateSession: mockUpdateSession,
+  }),
 }))
 
 vi.mock('@/adapters/auth', () => ({
@@ -128,8 +163,13 @@ vi.mock('@/adapters/auth', () => ({
 }))
 
 vi.mock('@/features/chat', () => ({
-  useChatStore: vi.fn((selector?: (state: MockChatState) => unknown) =>
-    selector ? selector(mockChatState) : mockChatState
+  useChatStore: Object.assign(
+    vi.fn((selector?: (state: MockChatState) => unknown) =>
+      selector ? selector(mockChatState) : mockChatState
+    ),
+    {
+      getState: () => mockChatState,
+    }
   ),
   useDeepResearch: vi.fn(),
   NoSourcesBanner: () => <div data-testid="no-sources-banner">No Sources Banner</div>,
@@ -142,10 +182,16 @@ vi.mock('@/features/projects', () => ({
 }))
 
 vi.mock('../store', () => ({
-  useLayoutStore: vi.fn(() => ({
-    rightPanel: null,
-    closeRightPanel: mockCloseRightPanel,
-  })),
+  useLayoutStore: vi.fn((selector?: (state: Record<string, unknown>) => unknown) => {
+    const state = {
+      rightPanel: mockRightPanel,
+      researchPanelMode: mockResearchPanelMode,
+      researchPanelWidthPercent: mockResearchPanelWidthPercent,
+      isResearchPanelResizing: mockIsResearchPanelResizing,
+      closeRightPanel: mockCloseRightPanel,
+    }
+    return selector ? selector(state) : state
+  }),
 }))
 
 vi.mock('@/hooks/use-reduced-motion', () => ({
@@ -157,16 +203,12 @@ vi.mock('./AppBar', () => ({
     lastAppBarProps = props
     return (
       <div data-testid="app-bar">
-        <div>{String(props.sessionTitle ?? '')}</div>
-        <div data-testid="app-bar-scope">
-          {props.isStandaloneScope ? 'standalone' : 'project'}
-        </div>
         <button
           type="button"
-          onClick={props.onNewSession as (() => void) | undefined}
-          disabled={Boolean(props.isNewSessionDisabled)}
+          onClick={props.onNewChat as (() => void) | undefined}
+          disabled={Boolean(props.isNewChatDisabled)}
         >
-          Header New Session
+          Header New Chat
         </button>
       </div>
     )
@@ -178,8 +220,20 @@ vi.mock('./SessionsPanel', () => ({
     lastSessionsPanelProps = props
     return (
       <div data-testid="sessions-panel">
-        <button type="button" onClick={props.onSelectStandalone as (() => void) | undefined}>
-          Select Standalone
+        <button type="button" onClick={props.onSelectRoot as (() => void) | undefined}>
+          Select Root
+        </button>
+        <button
+          type="button"
+          onClick={() => (props.onSelectProject as ((projectId: string) => void) | undefined)?.('project-1')}
+        >
+          Select Project
+        </button>
+        <button
+          type="button"
+          onClick={() => (props.onSelectSession as ((sessionId: string) => void) | undefined)?.('root-newer')}
+        >
+          Select Chat
         </button>
       </div>
     )
@@ -215,11 +269,40 @@ describe('MainLayout', () => {
     vi.clearAllMocks()
     lastAppBarProps = null
     lastSessionsPanelProps = null
-    mockChatState = { ...defaultChatState }
-    mockProjectsState = { ...defaultProjectsState }
+    mockRightPanel = null
+    mockResearchPanelMode = 'split'
+    mockResearchPanelWidthPercent = 60
+    mockIsResearchPanelResizing = false
+    mockChatState = {
+      ...mockChatState,
+      currentConversation: projectConversation,
+      currentUserId: 'user-1',
+      conversations: [projectConversation],
+      getUserConversations: getMockUserConversations,
+      isStreaming: false,
+      pendingInteraction: null,
+      isDeepResearchStreaming: false,
+      deepResearchOwnerConversationId: null,
+    }
+    mockProjectsState = {
+      ...mockProjectsState,
+      projects: [project],
+      currentProjectId: project.id,
+    }
+    mockCreateProject.mockResolvedValue({
+      id: 'project-2',
+      owner_id: 'user-1',
+      title: 'New Project',
+      description: null,
+      knowledge_collection_name: 'project_2',
+      created_at: '2026-04-08T18:00:00.000Z',
+      updated_at: '2026-04-08T18:00:00.000Z',
+    })
+    mockDeleteSession.mockResolvedValue(undefined)
+    mockUpdateSession.mockResolvedValue(undefined)
   })
 
-  test('renders all main sections', () => {
+  test('renders the main sections without workspace tabs', () => {
     render(<MainLayout isAuthenticated={true} />)
 
     expect(screen.getByTestId('app-bar')).toBeInTheDocument()
@@ -230,13 +313,14 @@ describe('MainLayout', () => {
     expect(screen.getByTestId('data-sources-panel')).toBeInTheDocument()
     expect(screen.getByTestId('providers-panel')).toBeInTheDocument()
     expect(screen.getByTestId('settings-panel')).toBeInTheDocument()
+    expect(screen.queryByTestId('workspace-tab-strip')).not.toBeInTheDocument()
   })
 
-  test('passes standalone scope to the header and sidebar when no project is active', () => {
+  test('passes root chat context when no project is active', () => {
     mockChatState = {
       ...mockChatState,
-      currentConversation: standaloneConversation,
-      getUserConversations: () => [standaloneConversation, projectConversation],
+      currentConversation: rootConversation,
+      conversations: [rootConversation, projectConversation],
     }
     mockProjectsState = {
       ...mockProjectsState,
@@ -245,55 +329,121 @@ describe('MainLayout', () => {
 
     render(<MainLayout isAuthenticated={true} />)
 
-    expect(screen.getByTestId('app-bar-scope')).toHaveTextContent('standalone')
-    expect(lastAppBarProps?.isStandaloneScope).toBe(true)
-    expect(lastSessionsPanelProps?.isStandaloneScope).toBe(true)
+    expect(lastAppBarProps?.isProjectContext).toBe(false)
+    expect(lastAppBarProps?.chatTitle).toBe('Root Chat')
+    expect(lastSessionsPanelProps?.selectedProjectId).toBeUndefined()
     expect(lastSessionsPanelProps?.sessions).toEqual([
-      expect.objectContaining({ id: standaloneConversation.id }),
+      expect.objectContaining({ id: rootConversation.id, title: rootConversation.title }),
     ])
   })
 
-  test('header new chat action clears project scope and route state', async () => {
+  test('new chat keeps the active project context', async () => {
     const user = userEvent.setup()
 
     render(<MainLayout isAuthenticated={true} />)
 
-    await user.click(screen.getByRole('button', { name: /header new session/i }))
+    await user.click(screen.getByRole('button', { name: /header new chat/i }))
 
-    expect(mockSetCurrentProjectId).toHaveBeenCalledWith(null)
+    expect(mockSetCurrentProjectId).toHaveBeenCalledWith(project.id)
     expect(mockStartNewSessionDraft).toHaveBeenCalledOnce()
-    expect(mockUpdateRouteUrl).toHaveBeenCalledWith(null, null)
+    expect(mockUpdateRouteUrl).toHaveBeenCalledWith(project.id, null)
     expect(mockCloseRightPanel).toHaveBeenCalledOnce()
   })
 
-  test('selecting standalone scope opens the newest standalone conversation', async () => {
+  test('selecting root chooses the newest unprojected chat', async () => {
     const user = userEvent.setup()
-    const olderStandalone = {
-      ...standaloneConversation,
-      id: 'standalone-older',
-      updatedAt: '2026-04-07T10:00:00.000Z',
+    const newerRootConversation = {
+      ...rootConversation,
+      id: 'root-newer',
+      updatedAt: '2026-04-08T19:00:00.000Z',
     }
-    const newerStandalone = {
-      ...standaloneConversation,
-      id: 'standalone-newer',
-      updatedAt: '2026-04-08T18:00:00.000Z',
+    const olderRootConversation = {
+      ...rootConversation,
+      id: 'root-older',
+      updatedAt: '2026-04-07T19:00:00.000Z',
     }
+
     mockChatState = {
       ...mockChatState,
       currentConversation: projectConversation,
-      getUserConversations: () => [projectConversation, olderStandalone, newerStandalone],
+      conversations: [projectConversation, olderRootConversation, newerRootConversation],
     }
 
     render(<MainLayout isAuthenticated={true} />)
 
-    await user.click(screen.getByRole('button', { name: /select standalone/i }))
+    await user.click(screen.getByRole('button', { name: /select root/i }))
 
-    expect(mockSetCurrentProjectId).toHaveBeenCalledWith(null)
-    expect(mockSelectConversation).toHaveBeenCalledWith('standalone-newer')
-    expect(mockUpdateRouteUrl).toHaveBeenCalledWith(null, 'standalone-newer')
+    expect(mockSelectConversation).toHaveBeenCalledWith('root-newer')
+    expect(mockUpdateRouteUrl).toHaveBeenCalledWith(null, 'root-newer')
   })
 
-  test('disables the header new chat action while shallow streaming is active', () => {
+  test('selecting a project chooses the newest project chat', async () => {
+    const user = userEvent.setup()
+    const olderProjectConversation = {
+      ...projectConversation,
+      id: 'project-older',
+      updatedAt: '2026-04-07T10:00:00.000Z',
+    }
+    const newerProjectConversation = {
+      ...projectConversation,
+      id: 'project-newer',
+      updatedAt: '2026-04-08T20:00:00.000Z',
+    }
+
+    mockChatState = {
+      ...mockChatState,
+      currentConversation: rootConversation,
+      conversations: [rootConversation, olderProjectConversation, newerProjectConversation],
+    }
+    mockProjectsState = {
+      ...mockProjectsState,
+      currentProjectId: null,
+    }
+
+    render(<MainLayout isAuthenticated={true} />)
+
+    await user.click(screen.getByRole('button', { name: /select project/i }))
+
+    expect(mockSelectConversation).toHaveBeenCalledWith('project-newer')
+    expect(mockUpdateRouteUrl).toHaveBeenCalledWith(project.id, 'project-newer')
+  })
+
+  test('recomputes sidebar chats from live conversations after a delete', () => {
+    const deletedConversation = {
+      ...projectConversation,
+      id: 'project-deleted',
+      title: 'Deleted Chat',
+      updatedAt: '2026-04-08T17:00:00.000Z',
+    }
+
+    mockChatState = {
+      ...mockChatState,
+      currentConversation: projectConversation,
+      conversations: [projectConversation, deletedConversation],
+      getUserConversations: () => [projectConversation, deletedConversation],
+    }
+
+    const { rerender } = render(<MainLayout isAuthenticated={true} />)
+
+    expect(lastSessionsPanelProps?.sessions).toEqual([
+      expect.objectContaining({ id: deletedConversation.id, title: deletedConversation.title }),
+      expect.objectContaining({ id: projectConversation.id, title: projectConversation.title }),
+    ])
+
+    mockChatState = {
+      ...mockChatState,
+      conversations: [projectConversation],
+      getUserConversations: () => [projectConversation, deletedConversation],
+    }
+
+    rerender(<MainLayout isAuthenticated={true} />)
+
+    expect(lastSessionsPanelProps?.sessions).toEqual([
+      expect.objectContaining({ id: projectConversation.id, title: projectConversation.title }),
+    ])
+  })
+
+  test('disables the header new chat action while navigation is blocked', () => {
     mockChatState = {
       ...mockChatState,
       isStreaming: true,
@@ -301,6 +451,20 @@ describe('MainLayout', () => {
 
     render(<MainLayout isAuthenticated={true} />)
 
-    expect(screen.getByRole('button', { name: /header new session/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /header new chat/i })).toBeDisabled()
+  })
+
+  test('collapses the chat pane when research is expanded to full width', () => {
+    mockRightPanel = 'research'
+    mockResearchPanelMode = 'full-width'
+    mockResearchPanelWidthPercent = 100
+
+    render(<MainLayout isAuthenticated={true} />)
+
+    expect(screen.getByTestId('main-layout-chat-pane')).toHaveStyle({
+      width: '0%',
+      opacity: '0',
+      pointerEvents: 'none',
+    })
   })
 })

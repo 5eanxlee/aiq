@@ -94,6 +94,16 @@ _TRACKING_PARAMS = frozenset(
     }
 )
 
+_ESCAPED_URL_SUFFIX_RE = re.compile(r"(?:\\(?:n|r|t|u[0-9a-fA-F]{4}))+.*$")
+
+
+def _clean_extracted_url(url: str) -> str:
+    """Strip escaped control-sequence noise and trailing punctuation from extracted URLs."""
+    cleaned = unescape(url).strip()
+    cleaned = _ESCAPED_URL_SUFFIX_RE.sub("", cleaned)
+    cleaned = cleaned.split()[0] if cleaned.split() else cleaned
+    return cleaned.rstrip(".,;:!?)'\"}]>")
+
 
 def _normalize_url(url: str) -> str:
     """Normalize a URL for comparison.
@@ -101,7 +111,7 @@ def _normalize_url(url: str) -> str:
     Lowercases scheme/host, strips trailing slash, removes fragments
     and common tracking parameters.
     """
-    url = unescape(url).strip()
+    url = _clean_extracted_url(url)
     parsed = urlparse(url)
     scheme = parsed.scheme.lower()
     netloc = parsed.netloc.lower()
@@ -207,6 +217,14 @@ class SourceRegistry:
     def has_url(self, url: str) -> bool:
         """Check if a URL (after normalization) is in the registry."""
         return _normalize_url(url) in self._urls
+
+    def get_entry_for_url(self, url: str) -> SourceEntry | None:
+        """Return the best matching source entry for a URL."""
+        resolved = self.resolve_url(url)
+        if resolved and resolved in self._urls:
+            return self._urls[resolved]
+        normalized = _normalize_url(url)
+        return self._urls.get(normalized) or self._urls.get(url)
 
     @staticmethod
     def _pick_unique(candidates: list[SourceEntry], strategy: str, url: str) -> str | None:
@@ -431,7 +449,7 @@ def extract_sources_from_tool_result(tool_name: str, content: str) -> list[Sourc
 # ---------------------------------------------------------------------------
 
 # Generic URL extractor — works for any tool output format
-_GENERIC_URL_RE = re.compile(r"https?://[^\s<>\"',\]]+")
+_GENERIC_URL_RE = re.compile(r"https?://[^\s<>\"',\]\\]+")
 
 
 # Patterns for extracting titles near URLs in common tool output formats
@@ -491,7 +509,9 @@ def _parse_generic_urls(content: str, tool_name: str) -> list[SourceEntry]:
     seen: set[str] = set()
     entries: list[SourceEntry] = []
     for match in _GENERIC_URL_RE.finditer(content):
-        url = unescape(match.group(0)).rstrip(".,;)")
+        url = _clean_extracted_url(match.group(0))
+        if not url:
+            continue
         normalized = _normalize_url(url)
         if normalized not in seen:
             seen.add(normalized)

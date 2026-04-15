@@ -1219,6 +1219,109 @@ class TestSQLAlchemyPoolFilter:
 
         assert filter_obj.filter(record) is True
 
+
+class TestProjectArtifactPersistence:
+    """Tests for storing deep research reports as project artifacts."""
+
+    @pytest.mark.asyncio
+    async def test_store_report_as_project_artifact_does_not_submit_to_project_knowledge(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Generated reports should be saved as artifacts without auto-ingesting into project context."""
+        import aiq_api.app_state as app_state_module
+        from aiq_api.jobs import runner as runner_module
+
+        class FakeStore:
+            def __init__(self) -> None:
+                self.created_artifacts: list[dict[str, object]] = []
+
+            async def get_session(self, session_id: str, include_snapshot: bool = False) -> dict[str, object] | None:
+                return {
+                    "id": session_id,
+                    "project_id": "project-1",
+                    "title": "Project chat",
+                }
+
+            async def get_project(self, project_id: str) -> dict[str, object] | None:
+                return {
+                    "id": project_id,
+                    "knowledge_collection_name": "project_alpha",
+                }
+
+            async def create_project_artifact(self, **kwargs: object) -> dict[str, object]:
+                self.created_artifacts.append(dict(kwargs))
+                return {
+                    "id": "artifact-1",
+                    "project_id": kwargs["project_id"],
+                    "session_id": kwargs["session_id"],
+                    "kind": kwargs["kind"],
+                    "title": kwargs["title"],
+                    "body_markdown": kwargs["body_markdown"],
+                    "citation_manifest": kwargs.get("citation_manifest") or [],
+                    "created_at": None,
+                }
+
+        class FakeLoop:
+            def __init__(self) -> None:
+                self.calls: list[tuple[object, tuple[object, ...]]] = []
+
+            async def run_in_executor(self, executor: object, func: object, *args: object) -> object:
+                self.calls.append((func, args))
+                return func(*args)
+
+        store = FakeStore()
+        loop = FakeLoop()
+
+        monkeypatch.setattr(app_state_module, "get_app_state_store", lambda: store)
+        monkeypatch.setattr(runner_module.asyncio, "get_running_loop", lambda: loop)
+        monkeypatch.setattr(
+            runner_module,
+            "_load_all_job_events_sync",
+            lambda db_url, job_id: [
+                {
+                    "type": "artifact.update",
+                    "timestamp": "2026-04-09T03:00:00Z",
+                    "data": {
+                        "type": "citation_source",
+                        "url": "https://example.com/source",
+                        "content": "A supporting citation snippet.",
+                        "title": "Example Source",
+                    },
+                }
+            ],
+        )
+
+        await runner_module._store_report_as_project_artifact(
+            db_url="sqlite:////tmp/jobs.db",
+            job_id="job-1",
+            session_id="session-1",
+            report="# Research Report\n\nFinal synthesized body.",
+        )
+
+        assert len(loop.calls) == 1
+        executed_func, executed_args = loop.calls[0]
+        assert executed_func is runner_module._load_all_job_events_sync
+        assert executed_args == ("sqlite:////tmp/jobs.db", "job-1")
+        assert len(store.created_artifacts) == 1
+        artifact = store.created_artifacts[0]
+        assert artifact["kind"] == "deep_research_report"
+        assert artifact["project_id"] == "project-1"
+        assert artifact["title"] == "Research Report"
+        assert "Final synthesized body." in str(artifact["body_markdown"])
+        assert "## Citation Manifest" in str(artifact["body_markdown"])
+        assert artifact["citation_manifest"] == [
+            {
+                "type": "citation_source",
+                "url": "https://example.com/source",
+                "content": "A supporting citation snippet.",
+                "title": "Example Source",
+                "domain": None,
+                "display_label": None,
+                "timestamp": "2026-04-09T03:00:00Z",
+            }
+        ]
+
     def test_filter_blocks_cancelled_errors(self):
         """Test filter blocks CancelledError messages."""
         import logging

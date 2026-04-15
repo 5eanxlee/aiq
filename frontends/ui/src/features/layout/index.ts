@@ -76,6 +76,7 @@ export type {
   LayoutStore,
   RightPanelType,
   ResearchPanelTab,
+  ResearchPanelMode,
   DataSourcesPanelTab,
   ThemeMode,
 } from './types'

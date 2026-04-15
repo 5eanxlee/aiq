@@ -10,21 +10,31 @@
 
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
+import {
+  DEFAULT_RESEARCH_PANEL_WIDTH_PERCENT,
+  MAX_RESEARCH_PANEL_WIDTH_PERCENT,
+  MIN_RESEARCH_PANEL_WIDTH_PERCENT,
+} from './types'
 import type {
   LayoutState,
   LayoutStore,
   RightPanelType,
+  ResearchPanelMode,
   ResearchPanelTab,
   DataSourcesPanelTab,
   ThemeMode,
 } from './types'
 import { createDataSourcesClient, type DataSourceFromAPI } from '@/adapters/api'
 import { WEB_SEARCH_SOURCE_ID } from './data-sources'
+import { resolvePreferredDataSourceIds, savePreferredDataSourceIds } from './lib/data-source-preferences'
 
 const initialState: LayoutState = {
-  isSessionsPanelOpen: false,
+  isSessionsPanelOpen: true,
   rightPanel: null,
   researchPanelTab: 'plan',
+  researchPanelMode: 'split',
+  researchPanelWidthPercent: DEFAULT_RESEARCH_PANEL_WIDTH_PERCENT,
+  isResearchPanelResizing: false,
   dataSourcesPanelTab: 'connections',
   enabledDataSourceIds: [], // Start empty, populated when data sources are fetched
   theme: 'light',
@@ -37,9 +47,17 @@ const initialState: LayoutState = {
   dataSourcePanelTab: 'connections',
 }
 
+const clampResearchPanelWidthPercent = (percent: number): number =>
+  Number.isFinite(percent)
+    ? Math.min(
+        MAX_RESEARCH_PANEL_WIDTH_PERCENT,
+        Math.max(MIN_RESEARCH_PANEL_WIDTH_PERCENT, Math.round(percent * 10) / 10)
+      )
+    : DEFAULT_RESEARCH_PANEL_WIDTH_PERCENT
+
 export const useLayoutStore = create<LayoutStore>()(
   devtools(
-    (set) => ({
+    (set, get) => ({
       ...initialState,
 
       toggleSessionsPanel: () =>
@@ -50,27 +68,115 @@ export const useLayoutStore = create<LayoutStore>()(
         ),
 
       setSessionsPanelOpen: (open: boolean) =>
-        set({ isSessionsPanelOpen: open }, false, 'setSessionsPanelOpen'),
+        set(
+          (state) => (state.isSessionsPanelOpen === open ? state : { isSessionsPanelOpen: open }),
+          false,
+          'setSessionsPanelOpen'
+        ),
+
+      setRightPanel: (panel: RightPanelType) =>
+        set(
+          (state) => (state.rightPanel === panel ? state : { rightPanel: panel }),
+          false,
+          'setRightPanel'
+        ),
 
       openRightPanel: (panel: RightPanelType) =>
-        set({ rightPanel: panel }, false, 'openRightPanel'),
+        set(
+          (state) => (state.rightPanel === panel ? state : { rightPanel: panel }),
+          false,
+          'openRightPanel'
+        ),
 
-      closeRightPanel: () => set({ rightPanel: null }, false, 'closeRightPanel'),
+      closeRightPanel: () =>
+        set(
+          (state) => (state.rightPanel === null ? state : { rightPanel: null }),
+          false,
+          'closeRightPanel'
+        ),
 
       setResearchPanelTab: (tab: ResearchPanelTab) =>
-        set({ researchPanelTab: tab }, false, 'setResearchPanelTab'),
+        set(
+          (state) => (state.researchPanelTab === tab ? state : { researchPanelTab: tab }),
+          false,
+          'setResearchPanelTab'
+        ),
+
+      setResearchPanelMode: (mode: ResearchPanelMode) =>
+        set(
+          (state) => {
+            if (state.researchPanelMode === mode) {
+              return state
+            }
+
+            return {
+              researchPanelMode: mode,
+              researchPanelWidthPercent:
+                mode === 'full-width'
+                  ? MAX_RESEARCH_PANEL_WIDTH_PERCENT
+                  : state.researchPanelWidthPercent >= MAX_RESEARCH_PANEL_WIDTH_PERCENT
+                    ? DEFAULT_RESEARCH_PANEL_WIDTH_PERCENT
+                    : state.researchPanelWidthPercent,
+            }
+          },
+          false,
+          'setResearchPanelMode'
+        ),
+
+      setResearchPanelWidthPercent: (percent: number) =>
+        set(
+          (state) => {
+            const researchPanelWidthPercent = clampResearchPanelWidthPercent(percent)
+            const researchPanelMode: ResearchPanelMode =
+              researchPanelWidthPercent >= MAX_RESEARCH_PANEL_WIDTH_PERCENT
+                ? 'full-width'
+                : 'split'
+
+            if (
+              state.researchPanelWidthPercent === researchPanelWidthPercent &&
+              state.researchPanelMode === researchPanelMode
+            ) {
+              return state
+            }
+
+            return {
+              researchPanelWidthPercent,
+              researchPanelMode,
+            }
+          },
+          false,
+          'setResearchPanelWidthPercent'
+        ),
+
+      setResearchPanelResizing: (resizing: boolean) =>
+        set(
+          (state) =>
+            state.isResearchPanelResizing === resizing
+              ? state
+              : { isResearchPanelResizing: resizing },
+          false,
+          'setResearchPanelResizing'
+        ),
 
       setDataSourcesPanelTab: (tab: DataSourcesPanelTab) =>
-        set({ dataSourcesPanelTab: tab }, false, 'setDataSourcesPanelTab'),
+        set(
+          (state) => (state.dataSourcesPanelTab === tab ? state : { dataSourcesPanelTab: tab }),
+          false,
+          'setDataSourcesPanelTab'
+        ),
 
       toggleDataSource: (id: string) =>
         set(
           (state) => {
             const isEnabled = state.enabledDataSourceIds.includes(id)
+            const enabledDataSourceIds = isEnabled
+              ? state.enabledDataSourceIds.filter((sourceId) => sourceId !== id)
+              : [...state.enabledDataSourceIds, id]
+
+            savePreferredDataSourceIds(enabledDataSourceIds)
+
             return {
-              enabledDataSourceIds: isEnabled
-                ? state.enabledDataSourceIds.filter((sourceId) => sourceId !== id)
-                : [...state.enabledDataSourceIds, id],
+              enabledDataSourceIds,
             }
           },
           false,
@@ -78,9 +184,17 @@ export const useLayoutStore = create<LayoutStore>()(
         ),
 
       setEnabledDataSources: (ids: string[]) =>
-        set({ enabledDataSourceIds: ids }, false, 'setEnabledDataSources'),
+        set(
+          () => {
+            savePreferredDataSourceIds(ids)
+            return { enabledDataSourceIds: ids }
+          },
+          false,
+          'setEnabledDataSources'
+        ),
 
-      setTheme: (theme: ThemeMode) => set({ theme }, false, 'setTheme'),
+      setTheme: (theme: ThemeMode) =>
+        set((state) => (state.theme === theme ? state : { theme }), false, 'setTheme'),
 
       fetchDataSources: async (authToken?: string) => {
         set({ dataSourcesLoading: true, dataSourcesError: null }, false, 'fetchDataSources/start')
@@ -88,11 +202,15 @@ export const useLayoutStore = create<LayoutStore>()(
         try {
           const client = createDataSourcesClient({ authToken })
           const response = await client.getDataSources()
+          const currentEnabledIds = get().availableDataSources
+            ? get().enabledDataSourceIds
+            : undefined
 
           // data_sources is already filtered (knowledge_layer removed) by the client
-          const enabledIds = response.data_sources
-            .filter((source) => source.default_enabled ?? source.id === WEB_SEARCH_SOURCE_ID)
-            .map((source) => source.id)
+          const enabledIds = resolvePreferredDataSourceIds(
+            response.data_sources,
+            currentEnabledIds
+          )
 
           set(
             {
@@ -121,9 +239,13 @@ export const useLayoutStore = create<LayoutStore>()(
       disableNonWebSources: () =>
         set(
           (state) => ({
-            enabledDataSourceIds: state.enabledDataSourceIds.filter(
-              (id) => id === WEB_SEARCH_SOURCE_ID
-            ),
+            enabledDataSourceIds: (() => {
+              const nextEnabledIds = state.enabledDataSourceIds.filter(
+                (id) => id === WEB_SEARCH_SOURCE_ID
+              )
+              savePreferredDataSourceIds(nextEnabledIds)
+              return nextEnabledIds
+            })(),
           }),
           false,
           'disableNonWebSources'
@@ -138,14 +260,20 @@ export const useLayoutStore = create<LayoutStore>()(
       // Deprecated actions - delegate to new ones
       setDetailsPanelTab: (tab: ResearchPanelTab) =>
         set(
-          { researchPanelTab: tab, detailsPanelTab: tab },
+          (state) =>
+            state.researchPanelTab === tab && state.detailsPanelTab === tab
+              ? state
+              : { researchPanelTab: tab, detailsPanelTab: tab },
           false,
           'setDetailsPanelTab'
         ),
 
       setDataSourcePanelTab: (tab: DataSourcesPanelTab) =>
         set(
-          { dataSourcesPanelTab: tab, dataSourcePanelTab: tab },
+          (state) =>
+            state.dataSourcesPanelTab === tab && state.dataSourcePanelTab === tab
+              ? state
+              : { dataSourcesPanelTab: tab, dataSourcePanelTab: tab },
           false,
           'setDataSourcePanelTab'
         ),

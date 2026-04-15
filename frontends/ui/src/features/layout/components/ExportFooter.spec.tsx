@@ -34,16 +34,26 @@ vi.mock('@/utils/download-as-markdown', () => ({
 }))
 
 const mockDownloadPdf = vi.fn()
+const mockClearPdfError = vi.fn()
+const mockClipboardWriteText = vi.fn().mockResolvedValue(undefined)
 vi.mock('@/hooks/use-download-pdf', () => ({
   useDownloadPdfRoute: () => ({
     downloadPdf: mockDownloadPdf,
     isLoading: false,
+    error: null,
+    clearError: mockClearPdfError,
   }),
 }))
 
 describe('ExportFooter', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    Object.defineProperty(window.navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: mockClipboardWriteText,
+      },
+    })
   })
 
   test('renders Markdown export button', () => {
@@ -56,6 +66,12 @@ describe('ExportFooter', () => {
     render(<ExportFooter />)
 
     expect(screen.getByRole('button', { name: /pdf/i })).toBeInTheDocument()
+  })
+
+  test('renders Copy Memo button', () => {
+    render(<ExportFooter />)
+
+    expect(screen.getByRole('button', { name: /copy memo/i })).toBeInTheDocument()
   })
 
   test('calls downloadAsMarkdown with content and conversation title', async () => {
@@ -78,11 +94,24 @@ describe('ExportFooter', () => {
     expect(mockDownloadPdf).toHaveBeenCalledWith('Some report content', 'AI Market Trends')
   })
 
+  test('copies the entire memo to the clipboard', async () => {
+    const user = userEvent.setup()
+    const clipboardWriteText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined)
+
+    render(<ExportFooter />)
+
+    await user.click(screen.getByRole('button', { name: /copy memo/i }))
+
+    expect(clipboardWriteText).toHaveBeenCalledWith('Some report content')
+    expect(screen.getByRole('button', { name: /memo copied to clipboard/i })).toBeInTheDocument()
+  })
+
   test('disables buttons when disabled prop is true', () => {
     render(<ExportFooter disabled={true} />)
 
     expect(screen.getByRole('button', { name: /markdown/i })).toBeDisabled()
     expect(screen.getByRole('button', { name: /pdf/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /copy memo/i })).toBeDisabled()
   })
 })
 
@@ -106,6 +135,7 @@ describe('ExportFooter - Busy State (via useIsCurrentSessionBusy)', () => {
 
     expect(screen.getByRole('button', { name: /markdown/i })).toBeDisabled()
     expect(screen.getByRole('button', { name: /pdf/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /copy memo/i })).toBeDisabled()
   })
 
   test('disables buttons when session is busy (submitted / running / HITL)', () => {
@@ -115,6 +145,7 @@ describe('ExportFooter - Busy State (via useIsCurrentSessionBusy)', () => {
 
     expect(screen.getByRole('button', { name: /markdown/i })).toBeDisabled()
     expect(screen.getByRole('button', { name: /pdf/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /copy memo/i })).toBeDisabled()
   })
 
   test('enables buttons when session is idle and research is complete', () => {
@@ -124,6 +155,7 @@ describe('ExportFooter - Busy State (via useIsCurrentSessionBusy)', () => {
 
     expect(screen.getByRole('button', { name: /export as markdown/i })).not.toBeDisabled()
     expect(screen.getByRole('button', { name: /export as pdf/i })).not.toBeDisabled()
+    expect(screen.getByRole('button', { name: /copy memo to clipboard/i })).not.toBeDisabled()
   })
 
   test('has appropriate title attribute when disabled due to active research', () => {
@@ -143,5 +175,6 @@ describe('ExportFooter - Busy State (via useIsCurrentSessionBusy)', () => {
 
     expect(screen.getByRole('button', { name: /markdown/i })).toBeDisabled()
     expect(screen.getByRole('button', { name: /pdf/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /copy memo/i })).toBeDisabled()
   })
 })

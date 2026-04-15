@@ -39,7 +39,10 @@ import {
   clearDeepResearchSession,
   clearAllDeepResearchSessions,
 } from './lib/deep-research-session-storage'
-import { isUnavailableDeepResearchJobError } from './lib/deep-research-errors'
+import {
+  isTransientDeepResearchTransportError,
+  isUnavailableDeepResearchJobError,
+} from './lib/deep-research-errors'
 import { hasActiveDeepResearchJob } from './lib/session-activity'
 import {
   logStorageWrite,
@@ -51,8 +54,13 @@ import {
 } from './lib/storage-logger'
 import { pruneMessageForStorage } from './lib/prune-message-for-storage'
 import { ensureStorageCapacity, checkStorageHealth } from './lib/storage-manager'
+import {
+  buildCitationDisplayLabel,
+  getCitationDomain,
+  mergeDeepResearchCitations,
+} from './lib/citation-formatting'
 import { useLayoutStore } from '@/features/layout/store'
-import { WEB_SEARCH_SOURCE_ID } from '@/features/layout/data-sources'
+import { resolvePreferredDataSourceIds } from '@/features/layout/lib/data-source-preferences'
 import { useProjectsStore } from '@/features/projects'
 
 const isQuotaExceededError = (error: unknown): boolean => {
@@ -226,7 +234,7 @@ const createNewConversation = (userId: string): Conversation => {
     id: `s_${uuidv4().replace(/-/g, '_')}`, // Milvus: letters, numbers, underscores only (no hyphens)
     userId,
     projectId,
-    title: 'New Session',
+    title: 'New Chat',
     messages: [],
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -257,27 +265,37 @@ const updateConversationInList = (
   return conversations.map((c) => (c.id === updatedConversation.id ? updatedConversation : c))
 }
 
-const getDefaultEnabledDataSourceIds = (): string[] => {
+const getPreferredEnabledDataSourceIds = (): string[] => {
   const layoutStore = useLayoutStore.getState()
-  return (
-    layoutStore.availableDataSources
-      ?.filter((source) => source.default_enabled ?? source.id === WEB_SEARCH_SOURCE_ID)
-      .map((source) => source.id) ?? []
-  )
+  const fallbackIds = layoutStore.availableDataSources
+    ? layoutStore.enabledDataSourceIds
+    : undefined
+
+  return resolvePreferredDataSourceIds(layoutStore.availableDataSources, fallbackIds)
 }
 
 const restoreConversationDataSources = (conversation: Conversation): void => {
   const layoutStore = useLayoutStore.getState()
 
   if (conversation.enabledDataSourceIds) {
+    if (!layoutStore.availableDataSources || layoutStore.availableDataSources.length === 0) {
+      layoutStore.setEnabledDataSources(conversation.enabledDataSourceIds)
+      return
+    }
+
     const availableIds = new Set(layoutStore.availableDataSources?.map((source) => source.id) ?? [])
     const validIds = conversation.enabledDataSourceIds.filter((id) => availableIds.has(id))
-    layoutStore.setEnabledDataSources(validIds)
+
+    if (validIds.length > 0 || conversation.enabledDataSourceIds.length === 0) {
+      layoutStore.setEnabledDataSources(validIds)
+      return
+    }
+
+    layoutStore.setEnabledDataSources(getPreferredEnabledDataSourceIds())
     return
   }
 
-  const defaultIds = getDefaultEnabledDataSourceIds()
-  layoutStore.setEnabledDataSources(defaultIds)
+  layoutStore.setEnabledDataSources(getPreferredEnabledDataSourceIds())
 }
 
 export const useChatStore = create<ChatStore>()(
@@ -363,11 +381,11 @@ export const useChatStore = create<ChatStore>()(
             throw new Error('Cannot create conversation without authenticated user')
           }
           const layoutState = useLayoutStore.getState()
-          const defaultEnabledDataSourceIds = getDefaultEnabledDataSourceIds()
-          layoutState.setEnabledDataSources(defaultEnabledDataSourceIds)
+          const initialEnabledDataSourceIds = getPreferredEnabledDataSourceIds()
+          layoutState.setEnabledDataSources(initialEnabledDataSourceIds)
           const newConversation: Conversation = {
             ...createNewConversation(currentUserId),
-            enabledDataSourceIds: defaultEnabledDataSourceIds,
+            enabledDataSourceIds: initialEnabledDataSourceIds,
           }
           set(
             (state) => ({
@@ -413,8 +431,8 @@ export const useChatStore = create<ChatStore>()(
           }
 
           const layoutState = useLayoutStore.getState()
-          const defaultEnabledDataSourceIds = getDefaultEnabledDataSourceIds()
-          layoutState.setEnabledDataSources(defaultEnabledDataSourceIds)
+          const initialEnabledDataSourceIds = getPreferredEnabledDataSourceIds()
+          layoutState.setEnabledDataSources(initialEnabledDataSourceIds)
 
           set(
             {
@@ -464,11 +482,11 @@ export const useChatStore = create<ChatStore>()(
           ensureStorageCapacity(currentConversation?.id ?? null, currentUserId)
 
           const layoutState = useLayoutStore.getState()
-          const defaultEnabledDataSourceIds = getDefaultEnabledDataSourceIds()
-          layoutState.setEnabledDataSources(defaultEnabledDataSourceIds)
+          const initialEnabledDataSourceIds = getPreferredEnabledDataSourceIds()
+          layoutState.setEnabledDataSources(initialEnabledDataSourceIds)
           const newConversation: Conversation = {
             ...createNewConversation(currentUserId),
-            enabledDataSourceIds: defaultEnabledDataSourceIds,
+            enabledDataSourceIds: initialEnabledDataSourceIds,
           }
           set(
             (state) => ({
@@ -592,9 +610,11 @@ export const useChatStore = create<ChatStore>()(
               throw new Error('Cannot create conversation without authenticated user')
             }
             const layoutState = useLayoutStore.getState()
+            const initialEnabledDataSourceIds = getPreferredEnabledDataSourceIds()
+            layoutState.setEnabledDataSources(initialEnabledDataSourceIds)
             conversation = {
               ...createNewConversation(currentUserId),
-              enabledDataSourceIds: [...layoutState.enabledDataSourceIds],
+              enabledDataSourceIds: initialEnabledDataSourceIds,
             }
           }
 
@@ -994,12 +1014,15 @@ export const useChatStore = create<ChatStore>()(
           const mergedConversations = [...nextUserConversations, ...otherConversations]
 
           const preferredCurrentId =
-            currentConversationId ??
-            (currentConversation?.userId === userId ? currentConversation.id : null)
+            currentConversationId === undefined
+              ? (currentConversation?.userId === userId ? currentConversation.id : null)
+              : currentConversationId
           const nextCurrentConversation =
-            nextUserConversations.find((conversation) => conversation.id === preferredCurrentId) ??
-            nextUserConversations[0] ??
-            (currentConversation?.userId !== userId ? currentConversation : null)
+            preferredCurrentId === null
+              ? (currentConversation?.userId !== userId ? currentConversation : null)
+              : nextUserConversations.find((conversation) => conversation.id === preferredCurrentId) ??
+                nextUserConversations[0] ??
+                (currentConversation?.userId !== userId ? currentConversation : null)
 
           set(
             {
@@ -1260,7 +1283,16 @@ export const useChatStore = create<ChatStore>()(
         },
 
         setReportContent: (content: string, category?: 'research_notes' | 'final_report') => {
-          set({ reportContent: content, reportContentCategory: category ?? null }, false, 'setReportContent')
+          const { deepResearchCitations } = get()
+          set(
+            {
+              reportContent: content,
+              reportContentCategory: category ?? null,
+              deepResearchCitations: mergeDeepResearchCitations(deepResearchCitations, content),
+            },
+            false,
+            'setReportContent'
+          )
         },
 
         clearThinkingSteps: () => {
@@ -1991,8 +2023,20 @@ export const useChatStore = create<ChatStore>()(
           }
         },
 
-        addDeepResearchCitation: (url: string, content: string, isCited?: boolean) => {
-          const { deepResearchCitations } = get()
+        addDeepResearchCitation: (
+          url: string,
+          content: string,
+          isCited?: boolean,
+          metadata?: { title?: string; domain?: string; displayLabel?: string }
+        ) => {
+          const { deepResearchCitations, reportContent } = get()
+          const domain = metadata?.domain ?? getCitationDomain(url)
+          const displayLabel = buildCitationDisplayLabel({
+            url,
+            title: metadata?.title,
+            domain,
+            displayLabel: metadata?.displayLabel,
+          })
 
           // Check if citation with same URL already exists
           const existingIndex = deepResearchCitations.findIndex((c) => c.url === url)
@@ -2004,6 +2048,9 @@ export const useChatStore = create<ChatStore>()(
                 return {
                   ...c,
                   content: content || c.content,
+                  title: metadata?.title || c.title,
+                  domain: domain || c.domain,
+                  displayLabel: metadata?.displayLabel || displayLabel || c.displayLabel,
                   // Once cited, always cited (citation_use trumps citation_source)
                   isCited: isCited || c.isCited,
                 }
@@ -2012,7 +2059,7 @@ export const useChatStore = create<ChatStore>()(
             })
 
             set(
-              { deepResearchCitations: updatedCitations },
+              { deepResearchCitations: mergeDeepResearchCitations(updatedCitations, reportContent) },
               false,
               'addDeepResearchCitation:update'
             )
@@ -2023,12 +2070,18 @@ export const useChatStore = create<ChatStore>()(
               url,
               content,
               timestamp: new Date(),
+              title: metadata?.title,
+              domain,
+              displayLabel,
               isCited,
             }
 
             set(
               {
-                deepResearchCitations: [...deepResearchCitations, newCitation],
+                deepResearchCitations: mergeDeepResearchCitations(
+                  [...deepResearchCitations, newCitation],
+                  reportContent
+                ),
               },
               false,
               'addDeepResearchCitation'
@@ -2296,11 +2349,9 @@ export const useChatStore = create<ChatStore>()(
               get().addDeepResearchBanner('failure', jobId, conversationId, {
                 durationMs: activeJobMessage.deepResearchDurationMs,
               })
-            } else {
-              // Mark as inactive to prevent retry loops
-              get().patchConversationMessage(conversationId, activeJobMessage.id, {
-                isDeepResearchActive: false,
-              })
+            } else if (isTransientDeepResearchTransportError(error)) {
+              // Leave the persisted job state alone. A refresh-time transport hiccup
+              // should not deactivate a job that is still running on the backend.
             }
           }
 

@@ -300,6 +300,30 @@ def test_list_config_presets_marks_current_and_recommended(tmp_path, monkeypatch
     assert presets[2].kind == "repo_config"
 
 
+def test_list_config_presets_matches_generated_runtime_to_source_preset(tmp_path, monkeypatch):
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir()
+    current_preset = configs_dir / "config_preset_current_setup.yml"
+    current_preset.write_text(
+        "# Preset: current setup\n# - Mirrors the current local setup.\ngeneral:\n  front_end:\n    _type: fastapi\nworkflow:\n  _type: chat_deepresearcher_agent\n",
+        encoding="utf-8",
+    )
+    other_preset = configs_dir / "config_preset_max_quality.yml"
+    other_preset.write_text(
+        "# Preset: max quality\n# - Highest quality preset.\ngeneral:\n  front_end:\n    _type: fastapi\nworkflow:\n  _type: chat_deepresearcher_agent\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(provider_routes, "_PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(provider_routes, "_CONFIGS_DIR", configs_dir)
+
+    presets = _list_config_presets("configs/generated/config_runtime_config_preset_current_setup.yml")
+
+    assert presets[0].config_path == "configs/config_preset_current_setup.yml"
+    assert presets[0].current is True
+    assert presets[1].current is False
+
+
 def test_config_supports_front_end_detects_web_enabled_configs(tmp_path):
     web_config = tmp_path / "config_web_default_llamaindex.yml"
     web_config.write_text("general:\n  front_end:\n    _type: fastapi\n", encoding="utf-8")
@@ -378,3 +402,33 @@ def test_build_config_runtime_masks_generated_nat_runtime_name(tmp_path, monkeyp
 
     assert runtime.current_config_path == "/tmp/nat_configdfpqk2r.yml"
     assert runtime.current_config_name == "Generated runtime config"
+
+
+def test_build_config_runtime_matches_generated_runtime_to_source_preset(tmp_path, monkeypatch):
+    monkeypatch.setattr(provider_routes, "_LOCAL_STACK_STATE_FILE", tmp_path / "missing.env")
+    monkeypatch.setattr(provider_routes, "_LOCAL_STACK_RESTART_SCRIPT", tmp_path / "missing.sh")
+
+    presets = [
+        provider_routes.ConfigPresetResponseItem(
+            id="preset_current_setup",
+            name="current setup",
+            config_path="configs/config_preset_current_setup.yml",
+            description="Current setup",
+            recommended=False,
+            current=False,
+        ),
+        provider_routes.ConfigPresetResponseItem(
+            id="preset_max_quality",
+            name="max quality",
+            config_path="configs/config_preset_max_quality.yml",
+            description="Max quality",
+            recommended=True,
+            current=False,
+        ),
+    ]
+
+    runtime = _build_config_runtime("configs/generated/config_runtime_config_preset_current_setup.yml", presets)
+
+    assert runtime.current_config_path == "configs/generated/config_runtime_config_preset_current_setup.yml"
+    assert runtime.current_config_name == "current setup"
+    assert runtime.current_preset_id == "preset_current_setup"

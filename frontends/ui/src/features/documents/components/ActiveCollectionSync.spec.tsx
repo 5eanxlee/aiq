@@ -134,4 +134,28 @@ describe('ActiveCollectionSync', () => {
       expect(orchestratorMocks.handleSessionChange).toHaveBeenCalledWith('legacy_session_collection')
     })
   })
+
+  test('re-syncs the project collection when switching from a project chat to a new draft in the same project', async () => {
+    mockConversation = {
+      id: 's_123',
+      projectId: 'p_1',
+      knowledgeCollectionName: 'project_p_1',
+      knowledgeCollectionNameOverride: null,
+    }
+
+    const { rerender } = render(<ActiveCollectionSync />)
+
+    await waitFor(() => {
+      expect(orchestratorMocks.handleSessionChange).toHaveBeenCalledWith('project_p_1')
+    })
+
+    orchestratorMocks.handleSessionChange.mockClear()
+    mockConversation = null
+
+    rerender(<ActiveCollectionSync />)
+
+    await waitFor(() => {
+      expect(orchestratorMocks.handleSessionChange).toHaveBeenCalledWith('project_p_1')
+    })
+  })
 })

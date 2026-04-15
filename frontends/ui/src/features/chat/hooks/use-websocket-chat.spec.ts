@@ -343,10 +343,9 @@ describe('useWebSocketChat', () => {
     expect(mockWsClient.sendMessage).toHaveBeenCalledWith('Hello', ['web', 'docs'])
   })
 
-  test('sendMessage adds knowledge_layer when files are uploaded', async () => {
+  test('sendMessage does not add knowledge_layer just because files are uploaded', async () => {
     mockWsClient.isConnected.mockReturnValue(true)
 
-    // Mock layout store without knowledge_layer (it's filtered out by API client)
     const mockLayoutStore = await import('@/features/layout/store')
     vi.mocked(mockLayoutStore.useLayoutStore.getState).mockReturnValue({
       enabledDataSourceIds: ['web', 'docs'],
@@ -367,36 +366,92 @@ describe('useWebSocketChat', () => {
       await result.current.sendMessage('Hello')
     })
 
-    // knowledge_layer should be ADDED since files exist for this session
-    expect(mockWsClient.sendMessage).toHaveBeenCalledWith('Hello', ['web', 'docs', 'knowledge_layer'])
+    expect(mockWsClient.sendMessage).toHaveBeenCalledWith('Hello', ['web', 'docs'])
   })
 
-  test('sendMessage adds knowledge_layer when files are ingesting', async () => {
+  test('sendMessage adds knowledge_layer for explicit uploaded-document requests', async () => {
     mockWsClient.isConnected.mockReturnValue(true)
 
-    // Mock layout store without knowledge_layer (it's filtered out by API client)
     const mockLayoutStore = await import('@/features/layout/store')
     vi.mocked(mockLayoutStore.useLayoutStore.getState).mockReturnValue({
-      enabledDataSourceIds: ['web'],
+      enabledDataSourceIds: ['web', 'docs'],
       knowledgeLayerAvailable: true,
     } as ReturnType<typeof mockLayoutStore.useLayoutStore.getState>)
 
-    // Mock documents store with files in ingesting state
     const mockDocumentsStore = await import('@/features/documents/store')
     vi.mocked(mockDocumentsStore.useDocumentsStore.getState).mockReturnValue({
       trackedFiles: [
-        { id: 'file-1', fileName: 'test.pdf', collectionName: 'conv-1', status: 'ingesting', fileSize: 1000 },
+        { id: 'file-1', fileName: 'test.pdf', collectionName: 'conv-1', status: 'success', fileSize: 1000 },
       ],
     } as ReturnType<typeof mockDocumentsStore.useDocumentsStore.getState>)
 
     const { result } = renderWebSocketHook()
 
     await act(async () => {
-      await result.current.sendMessage('Hello')
+      await result.current.sendMessage('Summarize the uploaded document')
     })
 
-    // knowledge_layer should be ADDED since files are being ingested
-    expect(mockWsClient.sendMessage).toHaveBeenCalledWith('Hello', ['web', 'knowledge_layer'])
+    expect(mockWsClient.sendMessage).toHaveBeenCalledWith('Summarize the uploaded document', [
+      'web',
+      'docs',
+      'knowledge_layer',
+    ])
+  })
+
+  test('sendMessage adds knowledge_layer when the user names a file', async () => {
+    mockWsClient.isConnected.mockReturnValue(true)
+
+    const mockLayoutStore = await import('@/features/layout/store')
+    vi.mocked(mockLayoutStore.useLayoutStore.getState).mockReturnValue({
+      enabledDataSourceIds: ['web'],
+      knowledgeLayerAvailable: true,
+    } as ReturnType<typeof mockLayoutStore.useLayoutStore.getState>)
+
+    const mockDocumentsStore = await import('@/features/documents/store')
+    vi.mocked(mockDocumentsStore.useDocumentsStore.getState).mockReturnValue({
+      trackedFiles: [
+        { id: 'file-1', fileName: 'roadmap-q4.pdf', collectionName: 'conv-1', status: 'success', fileSize: 1000 },
+      ],
+    } as ReturnType<typeof mockDocumentsStore.useDocumentsStore.getState>)
+
+    const { result } = renderWebSocketHook()
+
+    await act(async () => {
+      await result.current.sendMessage('What does roadmap-q4.pdf say about hiring?')
+    })
+
+    expect(mockWsClient.sendMessage).toHaveBeenCalledWith(
+      'What does roadmap-q4.pdf say about hiring?',
+      ['web', 'knowledge_layer']
+    )
+  })
+
+  test('sendMessage adds knowledge_layer for single-file deictic requests', async () => {
+    mockWsClient.isConnected.mockReturnValue(true)
+
+    const mockLayoutStore = await import('@/features/layout/store')
+    vi.mocked(mockLayoutStore.useLayoutStore.getState).mockReturnValue({
+      enabledDataSourceIds: ['web'],
+      knowledgeLayerAvailable: true,
+    } as ReturnType<typeof mockLayoutStore.useLayoutStore.getState>)
+
+    const mockDocumentsStore = await import('@/features/documents/store')
+    vi.mocked(mockDocumentsStore.useDocumentsStore.getState).mockReturnValue({
+      trackedFiles: [
+        { id: 'file-1', fileName: 'briefing.pdf', collectionName: 'conv-1', status: 'success', fileSize: 1000 },
+      ],
+    } as ReturnType<typeof mockDocumentsStore.useDocumentsStore.getState>)
+
+    const { result } = renderWebSocketHook()
+
+    await act(async () => {
+      await result.current.sendMessage('Summarize this')
+    })
+
+    expect(mockWsClient.sendMessage).toHaveBeenCalledWith('Summarize this', [
+      'web',
+      'knowledge_layer',
+    ])
   })
 
   test('sendMessage does not add knowledge_layer when knowledgeLayerAvailable is false', async () => {
@@ -420,11 +475,13 @@ describe('useWebSocketChat', () => {
     const { result } = renderWebSocketHook()
 
     await act(async () => {
-      await result.current.sendMessage('Hello')
+      await result.current.sendMessage('Summarize the uploaded document')
     })
 
-    // knowledge_layer should NOT be added even with files if knowledgeLayerAvailable is false
-    expect(mockWsClient.sendMessage).toHaveBeenCalledWith('Hello', ['web', 'docs'])
+    expect(mockWsClient.sendMessage).toHaveBeenCalledWith('Summarize the uploaded document', [
+      'web',
+      'docs',
+    ])
   })
 
   test('sendMessage creates and connects a session when none exists yet', async () => {

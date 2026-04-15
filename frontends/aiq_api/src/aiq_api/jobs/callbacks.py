@@ -35,6 +35,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
 from typing import Any
+from urllib.parse import urlparse
 
 from langchain_core.callbacks import BaseCallbackHandler
 from pydantic import BaseModel
@@ -351,18 +352,64 @@ class AgentEventCallback(BaseCallbackHandler):
         """Return the session-scoped SourceRegistry if set, otherwise None."""
         return get_session_registry()
 
+    @staticmethod
+    def _truncate_citation_label(label: str, max_length: int = 36) -> str:
+        cleaned = " ".join(label.split()).strip()
+        if len(cleaned) <= max_length:
+            return cleaned
+        return f"{cleaned[: max_length - 1].rstrip()}…"
+
+    @staticmethod
+    def _extract_domain(url: str) -> str | None:
+        try:
+            return urlparse(url).netloc.lower().removeprefix("www.")
+        except Exception:
+            return None
+
+    def _build_citation_artifact_fields(self, url: str) -> dict[str, str]:
+        registry = self._get_source_registry()
+        entry = registry.get_entry_for_url(url) if registry is not None else None
+        title = entry.title.strip() if entry and entry.title else None
+        domain = self._extract_domain(url)
+
+        display_source = title
+        if not display_source:
+            try:
+                parsed = urlparse(url)
+                path = parsed.path.rstrip("/")
+                display_source = f"{domain}{path}" if domain and path else domain or url
+            except Exception:
+                display_source = url
+
+        display_label = (
+            self._truncate_citation_label(display_source) if display_source else None
+        )
+
+        return {
+            key: value
+            for key, value in {
+                "title": title,
+                "domain": domain,
+                "display_label": display_label,
+            }.items()
+            if value
+        }
+
     def emit_final_report(self, content: str) -> None:
         """Emit the post-processed final report as an OUTPUT artifact.
 
         Call this after citation verification and sanitisation so the
         frontend receives the verified content (overwrites the earlier
-        auto-emitted version).
+        auto-emitted version). This path also re-emits citation_use
+        artifacts from the verified report so completed-job replays and
+        job-state summaries stay aligned with the final document.
         """
         self._emit_artifact(
             ArtifactType.OUTPUT,
             content,
             output_category="final_report",
         )
+        self._emit_cited_urls(content)
 
     def _is_search_tool(self, tool_name: str) -> bool:
         """Check if tool is a search-related tool that returns URLs."""
@@ -466,11 +513,13 @@ class AgentEventCallback(BaseCallbackHandler):
 
             if is_valid:
                 self._cited_urls.add(normalized)
+                citation_fields = self._build_citation_artifact_fields(url)
                 self._emit_artifact(
                     ArtifactType.CITATION_USE,
                     url,
-                    name=url,
+                    name=citation_fields.get("display_label") or citation_fields.get("title") or url,
                     url=url,
+                    **citation_fields,
                 )
 
     def _emit_tool_artifact(self, tool_name: str, tool_input: Any, run_id: str = "") -> None:
@@ -639,14 +688,16 @@ class AgentEventCallback(BaseCallbackHandler):
                 normalized = self._normalize_url(url)
                 if normalized not in self._discovered_urls:
                     self._discovered_urls.add(normalized)
+                    citation_fields = self._build_citation_artifact_fields(url)
                     self._emit_artifact(
                         ArtifactType.CITATION_SOURCE,
                         url,
-                        name=url,
+                        name=citation_fields.get("display_label") or citation_fields.get("title") or url,
                         url=url,
                         tool=tool_name,
                         agent_id=agent_info[1] if agent_info else None,
                         workflow=agent_info[0] if agent_info else None,
+                        **citation_fields,
                     )
 
         self._run_id_to_parent.pop(run_id, None)

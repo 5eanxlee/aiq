@@ -18,6 +18,7 @@ import { type FC } from 'react'
 import { Flex, Text } from '@/adapters/ui'
 import { Link, Check } from '@/adapters/ui/icons'
 import type { CitationSource } from '@/features/chat/types'
+import { buildCitationDisplayLabel, getCitationDomain } from '@/features/chat/lib/citation-formatting'
 
 interface CitationCardProps {
   /** Citation information */
@@ -33,21 +34,17 @@ const formatTime = (date: Date | string): string => {
 }
 
 /**
- * Extract domain from URL for display
- */
-const getDomain = (url: string): string => {
-  try {
-    const urlObj = new URL(url)
-    return urlObj.hostname.replace('www.', '')
-  } catch {
-    return url.substring(0, 30)
-  }
-}
-
-/**
  * Non-collapsible card showing a citation source as a clickable link.
  */
 export const CitationCard: FC<CitationCardProps> = ({ citation }) => {
+  const domain = citation.domain || getCitationDomain(citation.url)
+  const displayLabel = buildCitationDisplayLabel({
+    url: citation.url,
+    title: citation.title,
+    domain,
+    displayLabel: citation.displayLabel,
+  })
+
   return (
     <a
       href={citation.url}
@@ -88,7 +85,7 @@ export const CitationCard: FC<CitationCardProps> = ({ citation }) => {
                 : 'var(--text-color-subtle)',
             }}
           >
-            {getDomain(citation.url)}
+            {displayLabel}
           </Text>
 
           {/* Timestamp */}
@@ -97,9 +94,11 @@ export const CitationCard: FC<CitationCardProps> = ({ citation }) => {
           </Text>
         </Flex>
 
-        {/* Full URL */}
-        <Flex className="px-3 pb-2 border-t border-base">
-          <Text kind="body/regular/sm" className="text-subtle truncate mt-1 break-all">
+        <Flex direction="col" gap="1" className="px-3 pb-2 border-t border-base">
+          <Text kind="body/regular/xs" className="text-subtle mt-1">
+            {domain}
+          </Text>
+          <Text kind="body/regular/xs" className="text-subtle truncate break-all">
             {citation.url}
           </Text>
         </Flex>

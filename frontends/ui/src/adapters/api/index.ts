@@ -96,12 +96,14 @@ export type {
 export { createProviderStatusClient } from './provider-status-client'
 export type {
   ApplyLocalResearchOptionsResponseFromAPI,
+  LocalTavilyApiKeyStatusFromAPI,
   ProviderStatusClient,
   ProviderStatusClientOptions,
   ApplyConfigPresetResponseFromAPI,
   ConfigPresetFromAPI,
   ConfigRuntimeFromAPI,
   LocalResearchOptionsFromAPI,
+  UpdateLocalTavilyApiKeyResponseFromAPI,
   LocalConfigReloadStatusFromAPI,
   ProviderDashboardFromAPI,
   ProviderStatusFromAPI,

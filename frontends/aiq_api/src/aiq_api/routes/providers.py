@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import shlex
 import subprocess
 import time
@@ -326,6 +327,35 @@ def _config_supports_front_end(config_path: Path) -> bool:
     return False
 
 
+def _build_generated_runtime_config_path(config_path: str) -> str:
+    normalized = config_path.replace("\\", "/")
+    filename = Path(normalized).name
+    if normalized.startswith("configs/generated/") and filename.startswith("config_runtime_"):
+        return normalized
+
+    base_name = re.sub(r"\.(ya?ml)$", "", filename, flags=re.IGNORECASE)
+    safe_base_name = re.sub(r"[^a-zA-Z0-9_-]", "_", base_name)
+    return f"configs/generated/config_runtime_{safe_base_name}.yml"
+
+
+def _match_preset_for_config_path(
+    config_path: str | None,
+    presets: list["ConfigPresetResponseItem"],
+) -> "ConfigPresetResponseItem | None":
+    if not config_path:
+        return None
+
+    for preset in presets:
+        if preset.config_path == config_path:
+            return preset
+
+    for preset in presets:
+        if _build_generated_runtime_config_path(preset.config_path) == config_path:
+            return preset
+
+    return None
+
+
 def _extract_preset_metadata(config_path: Path, current_config_path: str | None) -> ConfigPresetResponseItem:
     lines = config_path.read_text(encoding="utf-8").splitlines()[:16]
     relative_path = config_path.relative_to(_PROJECT_ROOT).as_posix()
@@ -373,6 +403,9 @@ def _list_config_presets(current_config_path: str | None) -> list[ConfigPresetRe
         for path in sorted(_CONFIGS_DIR.glob("config_*.yml"))
         if _config_supports_front_end(path)
     ]
+    current_preset = _match_preset_for_config_path(current_config_path, presets)
+    for preset in presets:
+        preset.current = current_preset is not None and preset.config_path == current_preset.config_path
     presets.sort(
         key=lambda preset: (
             not preset.current,
@@ -386,7 +419,10 @@ def _list_config_presets(current_config_path: str | None) -> list[ConfigPresetRe
 
 def _format_config_path_name(current_config_path: str) -> str:
     filename = Path(current_config_path).name
-    if filename.startswith("nat_config") and filename.endswith((".yml", ".yaml")):
+    if (
+        filename.startswith("nat_config")
+        or filename.startswith("config_runtime_")
+    ) and filename.endswith((".yml", ".yaml")):
         return "Generated runtime config"
 
     stem = Path(current_config_path).stem
@@ -417,9 +453,9 @@ def _current_config_name(current_config_path: str | None, presets: list[ConfigPr
     if not current_config_path:
         return None
 
-    for preset in presets:
-        if preset.config_path == current_config_path:
-            return preset.name
+    current_preset = _match_preset_for_config_path(current_config_path, presets)
+    if current_preset is not None:
+        return current_preset.name
 
     return _format_config_path_name(current_config_path)
 
@@ -437,7 +473,7 @@ def _build_config_runtime(
     effective_current_path = current_config_path
     if not effective_current_path or not effective_current_path.startswith("configs/"):
         effective_current_path = state_config_path or effective_current_path
-    current_preset = next((preset for preset in presets if preset.config_path == effective_current_path), None)
+    current_preset = _match_preset_for_config_path(effective_current_path, presets)
 
     return ConfigRuntimeResponse(
         current_config_path=effective_current_path,

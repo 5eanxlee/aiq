@@ -33,6 +33,8 @@ const mockDocumentsStore = {
   trackedFiles: [],
   isUploading: false,
   isPolling: false,
+  isLoadingFiles: false,
+  loadedSessionId: null as string | null,
   shownBannersForJobs: {},
   markBannerShown: vi.fn(),
 }
@@ -89,6 +91,18 @@ describe('UploadOrchestrator', () => {
     mockMarkSessionHasCollection.mockReturnValue(undefined)
     mockUnmarkSessionCollection.mockReturnValue(undefined)
     mockGetPersistedJobForCollection.mockReturnValue(null)
+    mockDocumentsStore.isUploading = false
+    mockDocumentsStore.isPolling = false
+    mockDocumentsStore.isLoadingFiles = false
+    mockDocumentsStore.loadedSessionId = null
+    mockDocumentsStore.setFilesFromServer.mockImplementation((collectionName: string) => {
+      mockDocumentsStore.loadedSessionId = collectionName
+    })
+    mockDocumentsStore.clearFilesForCollection.mockImplementation((collectionName: string) => {
+      if (mockDocumentsStore.loadedSessionId === collectionName) {
+        mockDocumentsStore.loadedSessionId = null
+      }
+    })
     UploadOrchestrator.cleanup()
   })
 
@@ -118,13 +132,22 @@ describe('UploadOrchestrator', () => {
   })
 
   describe('handleSessionChange', () => {
-    test('does nothing when session is the same', async () => {
+    test('does not clear files when session is the same', async () => {
+      mockSessionHasKnownCollection.mockReturnValue(true)
+      mockClient.getCollection.mockResolvedValue({
+        name: 'session-1',
+        description: 'Test session',
+      })
+      mockClient.listFiles.mockResolvedValue([])
+
       await UploadOrchestrator.handleSessionChange('session-1')
       mockDocumentsStore.clearFilesForCollection.mockClear()
+      mockClient.getCollection.mockClear()
 
       await UploadOrchestrator.handleSessionChange('session-1')
 
       expect(mockDocumentsStore.clearFilesForCollection).not.toHaveBeenCalled()
+      expect(mockClient.getCollection).not.toHaveBeenCalled()
     })
 
     test('clears files when switching sessions', async () => {
@@ -174,6 +197,30 @@ describe('UploadOrchestrator', () => {
 
       await UploadOrchestrator.handleSessionChange('project_workspace_1')
       await vi.runAllTimersAsync()
+
+      expect(mockClient.getCollection).toHaveBeenCalledWith('project_workspace_1')
+      expect(mockClient.listFiles).toHaveBeenCalledWith('project_workspace_1')
+    })
+
+    test('retries hydrating a project collection when the active scope changes but files were not loaded yet', async () => {
+      mockSessionHasKnownCollection.mockReturnValue(false)
+      mockClient.getCollection.mockResolvedValue({
+        name: 'project_workspace_1',
+        description: 'Project memory',
+      })
+      mockClient.listFiles.mockResolvedValue([
+        { file_id: 'report.md', file_name: 'report.md', status: 'success' },
+      ])
+
+      await UploadOrchestrator.handleSessionChange('project_workspace_1')
+      mockClient.getCollection.mockClear()
+      mockClient.listFiles.mockClear()
+
+      // Simulate a draft/project scope transition where the collection is still active
+      // but the client has not marked it as hydrated yet.
+      mockDocumentsStore.loadedSessionId = null
+
+      await UploadOrchestrator.handleSessionChange('project_workspace_1')
 
       expect(mockClient.getCollection).toHaveBeenCalledWith('project_workspace_1')
       expect(mockClient.listFiles).toHaveBeenCalledWith('project_workspace_1')

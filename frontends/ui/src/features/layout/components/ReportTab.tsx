@@ -14,11 +14,12 @@
 
 'use client'
 
-import { type FC, type ReactNode } from 'react'
+import { type FC, type ReactNode, useMemo } from 'react'
 import { Flex, Text } from '@/adapters/ui'
 import { Document } from '@/adapters/ui/icons'
 import { MarkdownRenderer } from '@/shared/components/MarkdownRenderer'
 import { useChatStore } from '@/features/chat'
+import { formatReportMarkdownWithCitations } from '@/features/chat/lib/citation-formatting'
 import { ExportFooter } from './ExportFooter'
 
 interface ReportTabProps {
@@ -34,6 +35,7 @@ interface ReportTabProps {
 export const ReportTab: FC<ReportTabProps> = ({ children }) => {
   const reportContent = useChatStore((state) => state.reportContent)
   const reportContentCategory = useChatStore((state) => state.reportContentCategory)
+  const deepResearchCitations = useChatStore((state) => state.deepResearchCitations)
   const isStreaming = useChatStore((state) => state.isStreaming)
   const currentStatus = useChatStore((state) => state.currentStatus)
 
@@ -41,6 +43,13 @@ export const ReportTab: FC<ReportTabProps> = ({ children }) => {
   const isEmpty = !reportContentStr.trim()
   const isGeneratingReport = isStreaming && currentStatus === 'writing'
   const isResearchNotes = reportContentCategory === 'research_notes'
+  const formattedReportContent = useMemo(
+    () =>
+      isResearchNotes
+        ? reportContentStr
+        : formatReportMarkdownWithCitations(reportContentStr, deepResearchCitations),
+    [deepResearchCitations, isResearchNotes, reportContentStr]
+  )
 
   return (
     <Flex direction="col" className="h-full">
@@ -80,7 +89,7 @@ export const ReportTab: FC<ReportTabProps> = ({ children }) => {
           /* Final report: full prominence */
           <div className="flex-1">
             <MarkdownRenderer
-              content={reportContentStr}
+              content={formattedReportContent}
               isStreaming={isGeneratingReport}
               className="max-w-none"
             />

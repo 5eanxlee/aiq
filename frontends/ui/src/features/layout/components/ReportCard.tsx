@@ -14,10 +14,12 @@
 
 'use client'
 
-import { type FC, useCallback } from 'react'
+import { type FC, useCallback, useMemo } from 'react'
 import { Flex, Text, Button } from '@/adapters/ui'
 import { Download, Document } from '@/adapters/ui/icons'
 import { MarkdownRenderer } from '@/shared/components/MarkdownRenderer'
+import { useChatStore } from '@/features/chat'
+import { formatReportMarkdownWithCitations } from '@/features/chat/lib/citation-formatting'
 import { downloadAsMarkdown } from '@/utils/download-as-markdown'
 import { useDownloadPdfRoute } from '@/hooks/use-download-pdf'
 import { useIsCurrentSessionBusy } from '@/features/chat'
@@ -50,9 +52,14 @@ export const ReportCard: FC<ReportCardProps> = ({
   isStreaming: _isStreaming = false, // Deprecated - kept for backward compatibility but not used
 }) => {
   const { downloadPdf, isLoading: isPdfLoading } = useDownloadPdfRoute()
+  const deepResearchCitations = useChatStore((state) => state.deepResearchCitations)
+  const formattedContent = useMemo(
+    () => formatReportMarkdownWithCitations(content, deepResearchCitations),
+    [content, deepResearchCitations]
+  )
 
-  const hasContent = content.trim().length > 0
-  const wordCount = hasContent ? getWordCount(content) : 0
+  const hasContent = formattedContent.trim().length > 0
+  const wordCount = hasContent ? getWordCount(formattedContent) : 0
 
   // Uses centralized hook that checks BOTH ephemeral AND persisted state.
   // This survives page refresh: even if SSE ephemeral flags are lost,
@@ -69,13 +76,13 @@ export const ReportCard: FC<ReportCardProps> = ({
 
   const handleExportMarkdown = useCallback(() => {
     if (isExportDisabled) return
-    downloadAsMarkdown(content, title)
-  }, [isExportDisabled, content, title])
+    downloadAsMarkdown(formattedContent, title)
+  }, [formattedContent, isExportDisabled, title])
 
   const handleExportPDF = useCallback(() => {
     if (isExportDisabled || isPdfLoading) return
-    downloadPdf(content, title)
-  }, [isExportDisabled, isPdfLoading, content, downloadPdf, title])
+    downloadPdf(formattedContent, title)
+  }, [downloadPdf, formattedContent, isExportDisabled, isPdfLoading, title])
 
   if (!hasContent) {
     return (
@@ -115,7 +122,7 @@ export const ReportCard: FC<ReportCardProps> = ({
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto pr-2">
-        <MarkdownRenderer content={content} />
+        <MarkdownRenderer content={formattedContent} />
       </div>
 
       {/* Export Footer */}

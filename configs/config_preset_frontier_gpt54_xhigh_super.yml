@@ -86,7 +86,7 @@ functions:
     generate_summary: true
     summary_model: summary_llm
     summary_db: ${AIQ_SUMMARY_DB:-sqlite+aiosqlite:///./var/summaries.db}
-    top_k: 8
+    top_k: 3
     chroma_dir: ${AIQ_CHROMA_DIR:-/tmp/chroma_data}
 
   paper_search_tool:

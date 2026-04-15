@@ -238,7 +238,9 @@ describe('DataSourcesPanel', () => {
 
     render(<DataSourcesPanel />)
 
-    expect(screen.getByText(/files in project memory stay available across sessions in this project until deleted/i)).toBeInTheDocument()
+    expect(
+      screen.getByText(/files uploaded to this project stay available across chats in this project until deleted/i)
+    ).toBeInTheDocument()
   })
 
   test('shows standalone scope copy when no project is selected', () => {
@@ -275,8 +277,10 @@ describe('DataSourcesPanel', () => {
     render(<DataSourcesPanel />)
 
     expect(screen.getAllByText('Chat Only').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Standalone chat').length).toBeGreaterThan(0)
-    expect(screen.getByText(/files in this standalone chat stay only in this chat and are not reused by projects or other chats/i)).toBeInTheDocument()
+    expect(screen.getAllByText('This chat').length).toBeGreaterThan(0)
+    expect(
+      screen.getByText(/files in this chat stay only in this chat and are not reused by projects or other chats/i)
+    ).toBeInTheDocument()
   })
 
   test('does not render content when panel is closed', () => {

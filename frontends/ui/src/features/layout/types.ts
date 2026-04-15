@@ -18,6 +18,16 @@ export type RightPanelType = 'research' | 'data-sources' | 'providers' | 'settin
 /** Tabs within the Research panel */
 export type ResearchPanelTab = 'plan' | 'tasks' | 'thinking' | 'citations' | 'report'
 
+/** Display modes for the Research panel */
+export type ResearchPanelMode = 'split' | 'full-width'
+
+/** Default split width for the Research panel */
+export const DEFAULT_RESEARCH_PANEL_WIDTH_PERCENT = 60
+/** Minimum width allowed while dragging the Research panel */
+export const MIN_RESEARCH_PANEL_WIDTH_PERCENT = 36
+/** Maximum width allowed while dragging the Research panel */
+export const MAX_RESEARCH_PANEL_WIDTH_PERCENT = 100
+
 /** Tabs within the DataSources panel */
 export type DataSourcesPanelTab = 'connections' | 'files'
 
@@ -29,6 +39,12 @@ export interface LayoutState {
   rightPanel: RightPanelType
   /** Active tab in the research panel */
   researchPanelTab: ResearchPanelTab
+  /** Whether the research panel shares space with chat or takes the full workspace */
+  researchPanelMode: ResearchPanelMode
+  /** Width of the research panel when open, expressed as a percentage of the workspace */
+  researchPanelWidthPercent: number
+  /** Whether the research panel is currently being resized */
+  isResearchPanelResizing: boolean
   /** Active tab in the data sources panel */
   dataSourcesPanelTab: DataSourcesPanelTab
   /** IDs of enabled data sources (array for zustand serialization) */
@@ -59,12 +75,20 @@ export interface LayoutActions {
   toggleSessionsPanel: () => void
   /** Set sessions panel state */
   setSessionsPanelOpen: (open: boolean) => void
+  /** Directly set the open right panel */
+  setRightPanel: (panel: RightPanelType) => void
   /** Open a specific right panel (closes any existing) */
   openRightPanel: (panel: RightPanelType) => void
   /** Close the right panel */
   closeRightPanel: () => void
   /** Set the active research panel tab */
   setResearchPanelTab: (tab: ResearchPanelTab) => void
+  /** Set the active research panel display mode */
+  setResearchPanelMode: (mode: ResearchPanelMode) => void
+  /** Set the current research panel width percentage */
+  setResearchPanelWidthPercent: (percent: number) => void
+  /** Track whether the research panel is being actively resized */
+  setResearchPanelResizing: (resizing: boolean) => void
   /** Set the active data sources panel tab */
   setDataSourcesPanelTab: (tab: DataSourcesPanelTab) => void
   /** Toggle a data source enabled/disabled by ID */
@@ -73,7 +97,7 @@ export interface LayoutActions {
   setEnabledDataSources: (ids: string[]) => void
   /** Set the theme mode */
   setTheme: (theme: ThemeMode) => void
-  /** Fetch data sources from API. Only web_search is enabled by default */
+  /** Fetch data sources from API and restore the last saved source selection when possible */
   fetchDataSources: (authToken?: string) => Promise<void>
   /** Disable all non-web sources (keep only web_search enabled) */
   disableNonWebSources: () => void

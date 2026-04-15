@@ -32,10 +32,11 @@ export const ActiveCollectionSync = (): null => {
     currentConversation,
     currentProject?.knowledgeCollectionName
   )
+  const activeScopeKey = currentConversation?.id ?? currentProject?.id ?? currentCollectionName ?? null
 
   useEffect(() => {
     void UploadOrchestrator.handleSessionChange(currentCollectionName)
-  }, [currentCollectionName])
+  }, [activeScopeKey, currentCollectionName])
 
   useEffect(() => {
     const becameAvailable =

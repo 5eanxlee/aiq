@@ -18,6 +18,7 @@ import {
   checkBackendHealth,
   createProviderStatusClient,
   type LocalResearchOptionsFromAPI,
+  type LocalTavilyApiKeyStatusFromAPI,
 } from '@/adapters/api'
 import { useAuth } from '@/adapters/auth'
 import { useLayoutStore } from '../store'
@@ -27,8 +28,10 @@ import {
   getConfigDisplayMeta,
   getConfigKindLabel,
   getDisplayConfigName,
+  getStatusLabel,
   looksLikeGeneratedRuntimeConfig,
   StatusPill,
+  toneForProviderStatus,
   type PillTone,
   useProviderDashboardData,
 } from '../provider-dashboard'
@@ -293,6 +296,8 @@ interface DraftResearchOptions {
   knowledgeLayerEnabled: boolean
   generateSummary: boolean
   topK: string
+  minTotalSourcesRetrieved: string
+  minTotalCitedSources: string
 }
 
 const ConfigOptionRow = ({
@@ -320,11 +325,20 @@ const ConfigOptionRow = ({
 )
 
 const toDraftResearchOptions = (
-  options: Pick<LocalResearchOptionsFromAPI, 'knowledge_layer_enabled' | 'generate_summary' | 'top_k'>
+  options: Pick<
+    LocalResearchOptionsFromAPI,
+    | 'knowledge_layer_enabled'
+    | 'generate_summary'
+    | 'top_k'
+    | 'min_total_sources_retrieved'
+    | 'min_total_cited_sources'
+  >
 ): DraftResearchOptions => ({
   knowledgeLayerEnabled: options.knowledge_layer_enabled,
   generateSummary: options.generate_summary,
   topK: String(options.top_k),
+  minTotalSourcesRetrieved: String(options.min_total_sources_retrieved),
+  minTotalCitedSources: String(options.min_total_cited_sources),
 })
 
 export const SettingsPanel: FC = () => {
@@ -344,10 +358,17 @@ export const SettingsPanel: FC = () => {
   const [optionsApplying, setOptionsApplying] = useState(false)
   const [optionsError, setOptionsError] = useState<string | null>(null)
   const [researchOptions, setResearchOptions] = useState<LocalResearchOptionsFromAPI | null>(null)
+  const [tavilyStatus, setTavilyStatus] = useState<LocalTavilyApiKeyStatusFromAPI | null>(null)
+  const [tavilyLoading, setTavilyLoading] = useState(false)
+  const [tavilyApplying, setTavilyApplying] = useState(false)
+  const [tavilyError, setTavilyError] = useState<string | null>(null)
+  const [draftTavilyApiKey, setDraftTavilyApiKey] = useState('')
   const [draftOptions, setDraftOptions] = useState<DraftResearchOptions>({
     knowledgeLayerEnabled: false,
     generateSummary: false,
     topK: '5',
+    minTotalSourcesRetrieved: '0',
+    minTotalCitedSources: '0',
   })
   const [reloadPending, setReloadPending] = useState(false)
   const [reloadOperationId, setReloadOperationId] = useState<string | null>(null)
@@ -356,6 +377,7 @@ export const SettingsPanel: FC = () => {
   const isOpen = rightPanel === 'settings'
   const currentPresetPath = providerStatus?.config_runtime?.current_config_path ?? ''
   const canApplyPresets = providerStatus?.config_runtime?.can_apply_presets ?? false
+  const tavilyProvider = providerStatus?.providers.find((provider) => provider.id === 'tavily') ?? null
 
   const currentPreset = useMemo(() => {
     const configRuntime = providerStatus?.config_runtime
@@ -434,6 +456,33 @@ export const SettingsPanel: FC = () => {
     [idToken]
   )
 
+  const loadTavilyStatus = useCallback(
+    async (signal?: AbortSignal, options?: { silent?: boolean }) => {
+      if (!options?.silent) {
+        setTavilyLoading(true)
+      }
+      setTavilyError(null)
+
+      try {
+        const client = createProviderStatusClient({ authToken: idToken || undefined })
+        const response = await client.getLocalTavilyApiKeyStatus(signal)
+        setTavilyStatus(response)
+      } catch (loadError) {
+        if (signal?.aborted) {
+          return
+        }
+        setTavilyError(
+          loadError instanceof Error ? loadError.message : 'Failed to load the local Tavily API key status'
+        )
+      } finally {
+        if (!options?.silent) {
+          setTavilyLoading(false)
+        }
+      }
+    },
+    [idToken]
+  )
+
   useEffect(() => {
     if (!isOpen) {
       return
@@ -441,11 +490,12 @@ export const SettingsPanel: FC = () => {
 
     const controller = new AbortController()
     void loadResearchOptions(controller.signal)
+    void loadTavilyStatus(controller.signal)
 
     return () => {
       controller.abort()
     }
-  }, [isOpen, loadResearchOptions])
+  }, [isOpen, loadResearchOptions, loadTavilyStatus])
 
   useEffect(() => {
     if (!reloadPending) {
@@ -492,6 +542,7 @@ export const SettingsPanel: FC = () => {
           setSelectedPresetPath(status.previous_config_path ?? activePresetPath)
           void loadProviderStatus(undefined, { silent: true })
           void loadResearchOptions(undefined, { silent: true })
+          void loadTavilyStatus(undefined, { silent: true })
           return
         }
       } catch (statusError) {
@@ -520,7 +571,7 @@ export const SettingsPanel: FC = () => {
         window.clearTimeout(timeoutId)
       }
     }
-  }, [activePresetPath, idToken, loadProviderStatus, loadResearchOptions, reloadOperationId, reloadPending])
+  }, [activePresetPath, idToken, loadProviderStatus, loadResearchOptions, loadTavilyStatus, reloadOperationId, reloadPending])
 
   const handleOpenChange = useCallback(
     (open: boolean) => {
@@ -568,7 +619,27 @@ export const SettingsPanel: FC = () => {
 
   const handleOptionsApply = useCallback(async () => {
     const parsedTopK = Number(draftOptions.topK)
-    if (!researchOptions || !Number.isInteger(parsedTopK) || parsedTopK < 1 || parsedTopK > 50) {
+    const parsedMinTotalSourcesRetrieved = Number(draftOptions.minTotalSourcesRetrieved)
+    const parsedMinTotalCitedSources = Number(draftOptions.minTotalCitedSources)
+    const invalidTopK = !Number.isInteger(parsedTopK) || parsedTopK < 1 || parsedTopK > 50
+    const invalidRetrievedFloor =
+      !Number.isInteger(parsedMinTotalSourcesRetrieved) ||
+      parsedMinTotalSourcesRetrieved < 0 ||
+      parsedMinTotalSourcesRetrieved > 5000
+    const invalidCitedFloor =
+      !Number.isInteger(parsedMinTotalCitedSources) ||
+      parsedMinTotalCitedSources < 0 ||
+      parsedMinTotalCitedSources > 5000
+    const invalidFloorRelationship =
+      parsedMinTotalSourcesRetrieved > 0 && parsedMinTotalCitedSources > parsedMinTotalSourcesRetrieved
+
+    if (
+      !researchOptions ||
+      invalidTopK ||
+      invalidRetrievedFloor ||
+      invalidCitedFloor ||
+      invalidFloorRelationship
+    ) {
       return
     }
 
@@ -585,6 +656,8 @@ export const SettingsPanel: FC = () => {
         knowledge_layer_enabled: draftOptions.knowledgeLayerEnabled,
         generate_summary: draftOptions.generateSummary,
         top_k: parsedTopK,
+        min_total_sources_retrieved: parsedMinTotalSourcesRetrieved,
+        min_total_cited_sources: parsedMinTotalCitedSources,
       })
 
       setApplyMessage(response.message)
@@ -607,6 +680,44 @@ export const SettingsPanel: FC = () => {
       setOptionsApplying(false)
     }
   }, [draftOptions, idToken, loadProviderStatus, loadResearchOptions, researchOptions])
+
+  const handleTavilyApply = useCallback(async () => {
+    const nextApiKey = draftTavilyApiKey.trim()
+    if (!nextApiKey) {
+      return
+    }
+
+    setTavilyApplying(true)
+    setApplyError(null)
+    setApplyMessage(null)
+    setReloadPending(false)
+    setReloadOperationId(null)
+
+    try {
+      const client = createProviderStatusClient({ authToken: idToken || undefined })
+      const response = await client.updateLocalTavilyApiKey({ api_key: nextApiKey })
+
+      setApplyMessage(response.message)
+      if (response.status) {
+        setTavilyStatus(response.status)
+      }
+      setDraftTavilyApiKey('')
+      setReloadOperationId(response.operation_id ?? null)
+      setReloadPending(Boolean(response.operation_id))
+
+      if (!response.operation_id) {
+        void loadProviderStatus(undefined, { silent: true })
+        void loadResearchOptions(undefined, { silent: true })
+        void loadTavilyStatus(undefined, { silent: true })
+      }
+    } catch (nextError) {
+      setApplyError(
+        nextError instanceof Error ? nextError.message : 'Failed to update the local Tavily API key'
+      )
+    } finally {
+      setTavilyApplying(false)
+    }
+  }, [draftTavilyApiKey, idToken, loadProviderStatus, loadResearchOptions, loadTavilyStatus])
 
   const currentConfigCard = useMemo(() => {
     const configRuntime = providerStatus?.config_runtime
@@ -636,14 +747,43 @@ export const SettingsPanel: FC = () => {
   }, [currentPreset, providerStatus])
 
   const parsedTopK = Number(draftOptions.topK)
+  const parsedMinTotalSourcesRetrieved = Number(draftOptions.minTotalSourcesRetrieved)
+  const parsedMinTotalCitedSources = Number(draftOptions.minTotalCitedSources)
   const topKIsValid = Number.isInteger(parsedTopK) && parsedTopK >= 1 && parsedTopK <= 50
+  const minTotalSourcesRetrievedIsValid =
+    Number.isInteger(parsedMinTotalSourcesRetrieved) &&
+    parsedMinTotalSourcesRetrieved >= 0 &&
+    parsedMinTotalSourcesRetrieved <= 5000
+  const minTotalCitedSourcesIsValid =
+    Number.isInteger(parsedMinTotalCitedSources) &&
+    parsedMinTotalCitedSources >= 0 &&
+    parsedMinTotalCitedSources <= 5000
+  const sourceFloorRelationshipIsValid =
+    parsedMinTotalSourcesRetrieved === 0 || parsedMinTotalCitedSources <= parsedMinTotalSourcesRetrieved
+  const tavilyKeyDirty = draftTavilyApiKey.trim().length > 0
   const optionsDirty =
     !!researchOptions &&
     (
       draftOptions.knowledgeLayerEnabled !== researchOptions.knowledge_layer_enabled ||
       draftOptions.generateSummary !== researchOptions.generate_summary ||
-      parsedTopK !== researchOptions.top_k
+      parsedTopK !== researchOptions.top_k ||
+      parsedMinTotalSourcesRetrieved !== researchOptions.min_total_sources_retrieved ||
+      parsedMinTotalCitedSources !== researchOptions.min_total_cited_sources
     )
+  const tavilyStatusPill = tavilyProvider
+    ? {
+        label: getStatusLabel(tavilyProvider),
+        tone: toneForProviderStatus(tavilyProvider),
+      }
+    : tavilyStatus?.configured
+      ? {
+          label: 'Saved',
+          tone: 'warning' as PillTone,
+        }
+      : {
+          label: 'Not Set',
+          tone: 'neutral' as PillTone,
+        }
 
   return (
     <SidePanel
@@ -662,7 +802,7 @@ export const SettingsPanel: FC = () => {
       }
       slotFooter={
         <Text kind="body/regular/xs" className="text-subtle">
-          Model and option changes write runtime config updates and reload the local backend workflow.
+          Model, Tavily key, and runtime option changes reload the local backend workflow.
         </Text>
       }
     >
@@ -806,7 +946,7 @@ export const SettingsPanel: FC = () => {
           <Flex direction="col" gap="4">
             <div>
               <Text kind="label/semibold/xs" className="text-subtle uppercase tracking-[0.08em]">
-                Knowledge Retrieval Options
+                Research Runtime Options
               </Text>
               <Text kind="body/regular/xs" className="mt-1 block text-subtle leading-5">
                 These settings write a generated runtime config and reload the local backend so new research runs pick them up.
@@ -914,6 +1054,95 @@ export const SettingsPanel: FC = () => {
                   </Text>
                 )}
 
+                <div className="pt-2">
+                  <Text kind="label/semibold/xs" className="text-subtle uppercase tracking-[0.08em]">
+                    Research Source Floors
+                  </Text>
+                  <Text kind="body/regular/xs" className="mt-1 block text-subtle leading-5">
+                    These are hard per-run minimums. They count distinct verified sources captured or retained after citation verification. Use 0 to disable either floor.
+                  </Text>
+                </div>
+
+                <ConfigOptionRow
+                  title="Minimum Total Sources Retrieved"
+                  description="Require each deep research run to capture at least this many distinct verified sources before it can finish."
+                  control={
+                    <TextInput
+                      value={draftOptions.minTotalSourcesRetrieved}
+                      onValueChange={(value) =>
+                        setDraftOptions((current) => ({
+                          ...current,
+                          minTotalSourcesRetrieved: value,
+                        }))
+                      }
+                      type="number"
+                      size="small"
+                      className="w-28"
+                      placeholder="0"
+                      disabled={!researchOptions.can_edit || optionsApplying || reloadPending}
+                      attributes={{
+                        TextInputValue: {
+                          min: 0,
+                          max: 5000,
+                          step: 1,
+                          inputMode: 'numeric',
+                          'aria-label': 'Minimum total sources retrieved',
+                        },
+                      }}
+                    />
+                  }
+                />
+
+                <ConfigOptionRow
+                  title="Minimum Total Cited Sources"
+                  description="Require the final report to retain at least this many distinct verified sources after citation verification."
+                  control={
+                    <TextInput
+                      value={draftOptions.minTotalCitedSources}
+                      onValueChange={(value) =>
+                        setDraftOptions((current) => ({
+                          ...current,
+                          minTotalCitedSources: value,
+                        }))
+                      }
+                      type="number"
+                      size="small"
+                      className="w-28"
+                      placeholder="0"
+                      disabled={!researchOptions.can_edit || optionsApplying || reloadPending}
+                      attributes={{
+                        TextInputValue: {
+                          min: 0,
+                          max: 5000,
+                          step: 1,
+                          inputMode: 'numeric',
+                          'aria-label': 'Minimum total cited sources',
+                        },
+                      }}
+                    />
+                  }
+                />
+
+                {!minTotalSourcesRetrievedIsValid && (
+                  <Text kind="body/regular/xs" className="text-error">
+                    Minimum Total Sources Retrieved must be a whole number between 0 and 5000.
+                  </Text>
+                )}
+
+                {!minTotalCitedSourcesIsValid && (
+                  <Text kind="body/regular/xs" className="text-error">
+                    Minimum Total Cited Sources must be a whole number between 0 and 5000.
+                  </Text>
+                )}
+
+                {minTotalSourcesRetrievedIsValid &&
+                  minTotalCitedSourcesIsValid &&
+                  !sourceFloorRelationshipIsValid && (
+                    <Text kind="body/regular/xs" className="text-error">
+                      Minimum Total Cited Sources cannot exceed Minimum Total Sources Retrieved.
+                    </Text>
+                  )}
+
                 <Banner kind="inline" status="info" className="px-3 py-2">
                   {researchOptions.notes.join(' ')}
                 </Banner>
@@ -923,7 +1152,15 @@ export const SettingsPanel: FC = () => {
                     kind="secondary"
                     size="small"
                     onClick={() => void handleOptionsApply()}
-                    disabled={optionsApplying || reloadPending || !topKIsValid || !optionsDirty}
+                    disabled={
+                      optionsApplying ||
+                      reloadPending ||
+                      !topKIsValid ||
+                      !minTotalSourcesRetrievedIsValid ||
+                      !minTotalCitedSourcesIsValid ||
+                      !sourceFloorRelationshipIsValid ||
+                      !optionsDirty
+                    }
                     aria-label="Save research options"
                   >
                     {reloadPending ? 'Reloading Backend...' : 'Save Options & Reload Backend'}
@@ -935,6 +1172,92 @@ export const SettingsPanel: FC = () => {
                 )}
               </>
             )}
+
+            <div className="border-base border-t" />
+
+            <Flex direction="col" gap="4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <Text kind="label/semibold/xs" className="text-subtle uppercase tracking-[0.08em]">
+                    Tavily Search Key
+                  </Text>
+                  <Text kind="body/regular/xs" className="mt-1 block text-subtle leading-5">
+                    Update the Tavily API key stored in `deploy/.env`. Saving a new key reloads the local backend so the Tavily search tool picks up the new credential.
+                  </Text>
+                </div>
+                <StatusPill tone={tavilyStatusPill.tone}>{tavilyStatusPill.label}</StatusPill>
+              </div>
+
+              {tavilyLoading ? (
+                <Text kind="body/regular/xs" className="text-subtle">
+                  Loading Tavily key status...
+                </Text>
+              ) : tavilyError ? (
+                <Text kind="body/regular/xs" className="text-error">
+                  {tavilyError}
+                </Text>
+              ) : !tavilyStatus ? (
+                <Text kind="body/regular/xs" className="text-subtle">
+                  Local Tavily key status is unavailable for the current runtime.
+                </Text>
+              ) : (
+                <>
+                  {tavilyStatus.env_path && (
+                    <CodeDetailBlock label="Managed Env File" value={tavilyStatus.env_path} />
+                  )}
+
+                  <div className="border-base rounded-xl border px-4 py-4">
+                    <Text kind="label/semibold/sm" className="block text-primary">
+                      Tavily API Key
+                    </Text>
+                    <Text kind="body/regular/xs" className="mt-1 block text-subtle leading-5">
+                      {tavilyStatus.configured
+                        ? `Current saved value: ${tavilyStatus.key_hint ?? 'Configured'}. Enter a new key to replace it.`
+                        : 'No Tavily key is saved yet. Enter one to enable Tavily-backed web search on the local stack.'}
+                    </Text>
+
+                    <TextInput
+                      value={draftTavilyApiKey}
+                      onValueChange={setDraftTavilyApiKey}
+                      type="password"
+                      size="small"
+                      className="mt-3 w-full"
+                      placeholder={tavilyStatus.configured ? 'Paste a replacement Tavily API key' : 'Paste your Tavily API key'}
+                      disabled={!tavilyStatus.can_edit || tavilyApplying || reloadPending}
+                      attributes={{
+                        TextInputValue: {
+                          'aria-label': 'Tavily API key',
+                          autoComplete: 'off',
+                          autoCapitalize: 'none',
+                          autoCorrect: 'off',
+                          spellCheck: false,
+                        },
+                      }}
+                    />
+                  </div>
+
+                  <Banner kind="inline" status="info" className="px-3 py-2">
+                    {tavilyStatus.notes.join(' ')}
+                  </Banner>
+
+                  {tavilyStatus.can_edit ? (
+                    <Button
+                      kind="secondary"
+                      size="small"
+                      onClick={() => void handleTavilyApply()}
+                      disabled={tavilyApplying || reloadPending || !tavilyKeyDirty}
+                      aria-label="Save Tavily API key"
+                    >
+                      {reloadPending ? 'Reloading Backend...' : 'Save Tavily Key & Reload Backend'}
+                    </Button>
+                  ) : (
+                    <Text kind="body/regular/xs" className="text-subtle leading-5">
+                      In-UI Tavily key editing is available only when AI-Q is running via `./scripts/start_local_stack.sh`.
+                    </Text>
+                  )}
+                </>
+              )}
+            </Flex>
           </Flex>
         )}
       </Flex>

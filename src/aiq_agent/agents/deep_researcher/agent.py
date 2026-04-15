@@ -26,6 +26,7 @@ from aiq_agent.common import LLMRole
 from aiq_agent.common import load_prompt
 from aiq_agent.common import render_prompt_template
 from aiq_agent.common.citation_verification import EmptySourceRegistryError
+from aiq_agent.common.citation_verification import get_session_registry
 from aiq_agent.common.citation_verification import sanitize_report
 from aiq_agent.common.citation_verification import verify_citations
 
@@ -47,6 +48,7 @@ _MIN_REPORT_LENGTH = 5000
 
 # Path to this agent's directory (for loading prompts)
 AGENT_DIR = Path(__file__).parent
+_CITATION_KEY_PAGE_SUFFIX_RE = re.compile(r",\s*(?:p\.?|page)\s*\d+\s*$", re.IGNORECASE)
 
 
 @tool
@@ -108,6 +110,8 @@ class DeepResearcherAgent:
         tools: Sequence[BaseTool] | None = None,
         *,
         max_loops: int = 2,
+        min_total_sources_retrieved: int = 0,
+        min_total_cited_sources: int = 0,
         verbose: bool = True,
         callbacks: list[Any] | None = None,
     ) -> None:
@@ -118,14 +122,19 @@ class DeepResearcherAgent:
             llm_provider: LLMProvider for role-based LLM access.
             tools: Optional sequence of LangChain tools for research.
             max_loops: Maximum number of research loops (default 2).
+            min_total_sources_retrieved: Minimum distinct verified sources captured during the run (0 disables).
+            min_total_cited_sources: Minimum distinct verified sources cited in the final report (0 disables).
             verbose: Enable detailed logging.
             callbacks: Optional list of callbacks.
         """
         self.llm_provider = llm_provider
         self.tools = list(tools) if tools else []
         self.max_loops = max_loops
+        self.min_total_sources_retrieved = max(0, min_total_sources_retrieved)
+        self.min_total_cited_sources = max(0, min_total_cited_sources)
         self.verbose = verbose
         self.callbacks = callbacks or []
+        self._has_run_once = False
 
         if self.verbose:
             logger.info("Tools configured: %d", len(self.tools))
@@ -209,6 +218,8 @@ class DeepResearcherAgent:
                     self._prompts["planner"],
                     tools=self.tools_info,
                     available_documents=available_docs,
+                    min_total_sources_retrieved=self.min_total_sources_retrieved,
+                    min_total_cited_sources=self.min_total_cited_sources,
                 ),
                 "tools": self.all_tools,
                 "model": self.llm_provider.get(LLMRole.PLANNER),
@@ -225,6 +236,8 @@ class DeepResearcherAgent:
                     current_datetime=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     tools=self.tools_info,
                     available_documents=available_docs,
+                    min_total_sources_retrieved=self.min_total_sources_retrieved,
+                    min_total_cited_sources=self.min_total_cited_sources,
                 ),
                 "tools": self.all_tools,
                 "model": self.llm_provider.get(LLMRole.RESEARCHER),
@@ -250,6 +263,8 @@ class DeepResearcherAgent:
             clarifier_result=state.clarifier_result,
             available_documents=available_docs,
             tools=self.tools_info,
+            min_total_sources_retrieved=self.min_total_sources_retrieved,
+            min_total_cited_sources=self.min_total_cited_sources,
         )
 
         agent = create_deep_agent(
@@ -286,6 +301,73 @@ class DeepResearcherAgent:
                     if isinstance(file_content, str) and len(file_content) > len(content):
                         content = file_content
         return content
+
+    @staticmethod
+    def _normalize_citation_source_key(citation_key: str) -> str:
+        """Normalize a citation key so page-specific references count as one source."""
+        return _CITATION_KEY_PAGE_SUFFIX_RE.sub("", citation_key).strip().lower()
+
+    @classmethod
+    def _count_distinct_valid_citations(cls, valid_citations: Sequence[dict[str, Any]]) -> int:
+        """Count distinct cited sources after verification."""
+        seen: set[str] = set()
+        for citation in valid_citations:
+            url = citation.get("url")
+            if isinstance(url, str) and url:
+                seen.add(f"url:{url}")
+                continue
+
+            citation_key = citation.get("citation_key")
+            if isinstance(citation_key, str) and citation_key:
+                seen.add(f"key:{cls._normalize_citation_source_key(citation_key)}")
+
+        return len(seen)
+
+    def _count_total_sources_retrieved(self) -> int:
+        """Count distinct sources captured during the current run."""
+        return len(self.source_registry_middleware._get_registry().all_sources())
+
+    def _check_source_floor_requirements(
+        self,
+        report_text: str,
+        *,
+        verification_result=None,
+    ) -> tuple[bool, str, Any | None]:
+        """Validate run-level source floors against the active registry and report."""
+        total_sources_retrieved = self._count_total_sources_retrieved()
+        if (
+            self.min_total_sources_retrieved > 0
+            and total_sources_retrieved < self.min_total_sources_retrieved
+        ):
+            return (
+                False,
+                (
+                    "insufficient_total_sources_retrieved "
+                    f"({total_sources_retrieved}/{self.min_total_sources_retrieved})"
+                ),
+                verification_result,
+            )
+
+        if self.min_total_cited_sources > 0:
+            if verification_result is None:
+                registry = self.source_registry_middleware._get_registry()
+                verification_result = (
+                    verify_citations(report_text, registry)
+                    if registry.all_sources()
+                    else None
+                )
+
+            total_cited_sources = self._count_distinct_valid_citations(
+                verification_result.valid_citations if verification_result else []
+            )
+            if total_cited_sources < self.min_total_cited_sources:
+                return (
+                    False,
+                    f"insufficient_total_cited_sources ({total_cited_sources}/{self.min_total_cited_sources})",
+                    verification_result,
+                )
+
+        return True, "source_floors_met", verification_result
 
     def _is_report_complete(self, result: dict | Any) -> tuple[bool, str]:
         """
@@ -342,6 +424,10 @@ class DeepResearcherAgent:
                 if not has_any_valid:
                     return False, "no_valid_citations"
 
+        floors_met, floor_reason, _ = self._check_source_floor_requirements(content)
+        if not floors_met:
+            return False, floor_reason
+
         giving_up_patterns = [
             "please confirm",
             "do you want me to",
@@ -368,6 +454,11 @@ class DeepResearcherAgent:
         """
 
         agent = self._build_orchestrator_agent(state)
+
+        # For direct workflow/eval usage there may be no session-scoped registry.
+        # Clear the reusable instance registry so each run starts with clean evidence.
+        if get_session_registry() is None and self._has_run_once:
+            self.source_registry_middleware.registry.clear()
 
         messages = state.messages
         if messages:
@@ -421,6 +512,17 @@ class DeepResearcherAgent:
                     source_list = self.source_registry_middleware.get_source_list_text()
                     if source_list:
                         feedback_msg += "\n\n" + source_list
+                elif "insufficient_total_sources_retrieved" in reason:
+                    feedback_msg += (
+                        "You have not gathered enough distinct verified sources for this run. "
+                        "Continue research and add materially new, non-duplicate sources until the required floor is met."
+                    )
+                elif "insufficient_total_cited_sources" in reason:
+                    feedback_msg += (
+                        "Your report cites too few distinct verified sources. "
+                        "Expand the report to cite more of the verified sources already gathered, "
+                        "and continue researching if you still need broader coverage."
+                    )
 
                 feedback_msg += (
                     " IMPORTANT: Do NOT restart the research from scratch."
@@ -470,8 +572,15 @@ class DeepResearcherAgent:
                 final_message = self._extract_report_content(result["messages"])
 
             # Post-process: verify citations against source registry
-            if self.source_registry_middleware._get_registry().all_sources():
-                verification = verify_citations(final_message, self.source_registry_middleware._get_registry())
+            registry = self.source_registry_middleware._get_registry()
+            if registry.all_sources():
+                verification = verify_citations(final_message, registry)
+                floors_met, floor_reason, verification = self._check_source_floor_requirements(
+                    final_message,
+                    verification_result=verification,
+                )
+                if not floors_met:
+                    raise RuntimeError(f"Deep research failed to meet source-floor requirements: {floor_reason}")
                 if verification.removed_citations:
                     removed_details = []
                     for c in verification.removed_citations:
@@ -514,3 +623,5 @@ class DeepResearcherAgent:
         except Exception as ex:
             logger.error("Deep Research Subagent failed: %s", ex, exc_info=True)
             raise
+        finally:
+            self._has_run_once = True

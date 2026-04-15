@@ -57,6 +57,8 @@ interface ResearchOptionsPayload {
   knowledge_layer_enabled: boolean
   generate_summary: boolean
   top_k: number
+  min_total_sources_retrieved: number
+  min_total_cited_sources: number
   notes: string[]
 }
 
@@ -64,6 +66,8 @@ interface ApplyResearchOptionsRequest {
   knowledge_layer_enabled?: boolean
   generate_summary?: boolean
   top_k?: number
+  min_total_sources_retrieved?: number
+  min_total_cited_sources?: number
 }
 
 const findProjectRoot = (): string => {
@@ -262,11 +266,16 @@ const extractResearchOptions = (
       knowledge_layer_enabled: false,
       generate_summary: false,
       top_k: 5,
+      min_total_sources_retrieved: 0,
+      min_total_cited_sources: 0,
       notes: ['The active config does not define a knowledge_search function, so these options are unavailable.'],
     }
   }
 
   const knowledgeSearch = functions.knowledge_search as Record<string, unknown>
+  const deepResearchAgent = isRecord(functions.deep_research_agent)
+    ? (functions.deep_research_agent as Record<string, unknown>)
+    : null
   const relevantConsumers = KNOWLEDGE_TOOL_CONSUMERS.filter((fnName) => {
     const fnConfig = functions[fnName]
     return isRecord(fnConfig) && Array.isArray(fnConfig.tools)
@@ -278,6 +287,16 @@ const extractResearchOptions = (
 
   const rawTopK = Number(knowledgeSearch.top_k ?? 5)
   const topK = Number.isFinite(rawTopK) && rawTopK > 0 ? Math.trunc(rawTopK) : 5
+  const rawMinTotalSourcesRetrieved = Number(deepResearchAgent?.min_total_sources_retrieved ?? 0)
+  const minTotalSourcesRetrieved =
+    Number.isFinite(rawMinTotalSourcesRetrieved) && rawMinTotalSourcesRetrieved >= 0
+      ? Math.trunc(rawMinTotalSourcesRetrieved)
+      : 0
+  const rawMinTotalCitedSources = Number(deepResearchAgent?.min_total_cited_sources ?? 0)
+  const minTotalCitedSources =
+    Number.isFinite(rawMinTotalCitedSources) && rawMinTotalCitedSources >= 0
+      ? Math.trunc(rawMinTotalCitedSources)
+      : 0
 
   return {
     supported: true,
@@ -289,9 +308,13 @@ const extractResearchOptions = (
     knowledge_layer_enabled: knowledgeLayerEnabled,
     generate_summary: knowledgeSearch.generate_summary === true,
     top_k: topK,
+    min_total_sources_retrieved: minTotalSourcesRetrieved,
+    min_total_cited_sources: minTotalCitedSources,
     notes: [
       'Top K applies to future retrieval calls after the backend reloads.',
       'Generate Summary affects newly uploaded or re-ingested files. Existing files keep their current summary state.',
+      'Minimum Total Sources Retrieved counts distinct verified sources captured during a single research run. It does not increase tool budgets by itself.',
+      'Minimum Total Cited Sources counts distinct verified sources that survive citation verification in the final report. Use 0 to disable either floor.',
     ],
   }
 }
@@ -346,10 +369,16 @@ const applyResearchOptions = (
   if (!functions || !isRecord(functions.knowledge_search)) {
     throw new Error('The active config does not define functions.knowledge_search.')
   }
+  if (!isRecord(functions.deep_research_agent)) {
+    throw new Error('The active config does not define functions.deep_research_agent.')
+  }
 
   const knowledgeSearch = functions.knowledge_search as Record<string, unknown>
+  const deepResearchAgent = functions.deep_research_agent as Record<string, unknown>
   knowledgeSearch.top_k = request.top_k
   knowledgeSearch.generate_summary = request.generate_summary
+  deepResearchAgent.min_total_sources_retrieved = request.min_total_sources_retrieved
+  deepResearchAgent.min_total_cited_sources = request.min_total_cited_sources
 
   if (request.generate_summary) {
     ensureSummaryModelConfig(config, knowledgeSearch)
@@ -421,6 +450,8 @@ export async function GET(): Promise<Response> {
       knowledge_layer_enabled: false,
       generate_summary: false,
       top_k: 5,
+      min_total_sources_retrieved: 0,
+      min_total_cited_sources: 0,
       notes: ['Local config option editing is only available when AI-Q is running via ./scripts/start_local_stack.sh.'],
     } satisfies ResearchOptionsPayload)
   }
@@ -447,6 +478,8 @@ export async function GET(): Promise<Response> {
       knowledge_layer_enabled: false,
       generate_summary: false,
       top_k: 5,
+      min_total_sources_retrieved: 0,
+      min_total_cited_sources: 0,
       notes: [error instanceof Error ? error.message : 'The active config could not be read.'],
     } satisfies ResearchOptionsPayload)
   }
@@ -486,11 +519,24 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     if (!Number.isInteger(topK) || topK < 1 || topK > 50) {
       throw new Error('Top K must be a whole number between 1 and 50.')
     }
+    const minTotalSourcesRetrieved = Number(body.min_total_sources_retrieved ?? 0)
+    if (!Number.isInteger(minTotalSourcesRetrieved) || minTotalSourcesRetrieved < 0 || minTotalSourcesRetrieved > 5000) {
+      throw new Error('Minimum Total Sources Retrieved must be a whole number between 0 and 5000.')
+    }
+    const minTotalCitedSources = Number(body.min_total_cited_sources ?? 0)
+    if (!Number.isInteger(minTotalCitedSources) || minTotalCitedSources < 0 || minTotalCitedSources > 5000) {
+      throw new Error('Minimum Total Cited Sources must be a whole number between 0 and 5000.')
+    }
+    if (minTotalSourcesRetrieved > 0 && minTotalCitedSources > minTotalSourcesRetrieved) {
+      throw new Error('Minimum Total Cited Sources cannot exceed Minimum Total Sources Retrieved.')
+    }
 
     requestBody = {
       knowledge_layer_enabled: body.knowledge_layer_enabled === true,
       generate_summary: body.generate_summary === true,
       top_k: topK,
+      min_total_sources_retrieved: minTotalSourcesRetrieved,
+      min_total_cited_sources: minTotalCitedSources,
     }
   } catch (error) {
     return NextResponse.json(
@@ -522,7 +568,9 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     const noChanges =
       currentOptions.knowledge_layer_enabled === requestBody.knowledge_layer_enabled &&
       currentOptions.generate_summary === requestBody.generate_summary &&
-      currentOptions.top_k === requestBody.top_k
+      currentOptions.top_k === requestBody.top_k &&
+      currentOptions.min_total_sources_retrieved === requestBody.min_total_sources_retrieved &&
+      currentOptions.min_total_cited_sources === requestBody.min_total_cited_sources
 
     if (noChanges) {
       return NextResponse.json({

@@ -151,4 +151,19 @@ describe('useLoadJobData', () => {
       'Failed to get job status: 404'
     )
   })
+
+  test('ignores transient 500 failures when importing stream data for an active job', async () => {
+    mockGetJobStatus.mockRejectedValue(new Error('Failed to get job status: 500'))
+
+    const { result } = renderHook(() => useLoadJobData())
+
+    await act(async () => {
+      await result.current.importStreamOnly('job-500')
+    })
+
+    expect(mockAddErrorCard).not.toHaveBeenCalled()
+    expect(mockCompleteDeepResearch).not.toHaveBeenCalled()
+    expect(mockSetStreaming).not.toHaveBeenCalled()
+    expect(mockStopAllDeepResearchSpinners).not.toHaveBeenCalled()
+  })
 })

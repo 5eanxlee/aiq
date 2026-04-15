@@ -393,3 +393,40 @@ class TestArtifactHelpers:
         assert len(sources_cited) == 1
         assert "https://example.com" in sources_cited
         assert len(sources_found) == 0
+
+    def test_process_artifact_update_normalizes_escaped_url_suffixes(self):
+        """Test that malformed escaped newline suffixes are stripped from tracked URLs."""
+        from aiq_api.routes.jobs import _process_artifact_update
+
+        event = {"name": "https://example.com/report", "timestamp": "2026-01-22T10:00:00"}
+        data = {
+            "type": "citation_source",
+            "content": "https://example.com/report\\n\\n4",
+            "url": "https://example.com/report\\n\\n4",
+        }
+        metadata = {}
+        outputs: list = []
+        sources_found: set = set()
+        sources_cited: set = set()
+
+        _process_artifact_update(event, data, metadata, outputs, sources_found, sources_cited)
+
+        assert sources_found == {"https://example.com/report"}
+
+    def test_process_artifact_update_backfills_cited_urls_from_final_report(self):
+        """Test that final_report outputs can be used to recover cited URLs."""
+        from aiq_api.routes.jobs import _augment_cited_urls_from_final_report
+
+        outputs = [
+            {
+                "type": "output",
+                "output_category": "final_report",
+                "content": "## Sources\n[1] Example: https://example.com/report\n",
+            }
+        ]
+        sources_found = {"https://example.com/report"}
+        sources_cited: set[str] = set()
+
+        _augment_cited_urls_from_final_report(outputs, sources_found, sources_cited)
+
+        assert sources_cited == {"https://example.com/report"}

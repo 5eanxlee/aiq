@@ -168,6 +168,9 @@ export interface ArtifactUpdateEvent extends DeepResearchSSEEvent {
       type: ArtifactType
       content: string | TodoItem[]
       url?: string // For citation_source and citation_use types
+      title?: string
+      domain?: string
+      display_label?: string
     }
     metadata?: {
       workflow?: string
@@ -222,7 +225,12 @@ export interface DeepResearchCallbacks {
   onToolEnd?: (name: string, output?: string, eventId?: string, agentId?: string) => void
   /** Called on artifact updates */
   onTodoUpdate?: (todos: TodoItem[], workflow?: string) => void
-  onCitationUpdate?: (url: string, content: string, isCited?: boolean) => void
+  onCitationUpdate?: (
+    url: string,
+    content: string,
+    isCited?: boolean,
+    metadata?: { title?: string; domain?: string; displayLabel?: string }
+  ) => void
   onFileUpdate?: (filename: string, content: string) => void
   onOutputUpdate?: (content: string, outputCategory?: string, workflow?: string) => void
   /** Called on job heartbeat (confirms job is alive during long operations) */
@@ -552,11 +560,17 @@ export const createDeepResearchClient = (
             type: ArtifactType
             content: string | TodoItem[]
             url?: string
+            title?: string
+            domain?: string
+            display_label?: string
             output_category?: string
           }
           type?: ArtifactType
           content?: string | TodoItem[]
           url?: string
+          title?: string
+          domain?: string
+          display_label?: string
           output_category?: string
           metadata?: { workflow?: string }
         }
@@ -573,7 +587,12 @@ export const createDeepResearchClient = (
             callbacks.onCitationUpdate?.(
               artifactData.url || '',
               artifactData.content as string,
-              false
+              false,
+              {
+                title: artifactData.title,
+                domain: artifactData.domain,
+                displayLabel: artifactData.display_label,
+              }
             )
             break
           case 'citation_use':
@@ -581,7 +600,12 @@ export const createDeepResearchClient = (
             callbacks.onCitationUpdate?.(
               artifactData.url || '',
               artifactData.content as string,
-              true
+              true,
+              {
+                title: artifactData.title,
+                domain: artifactData.domain,
+                displayLabel: artifactData.display_label,
+              }
             )
             break
           case 'file': {
@@ -755,6 +779,8 @@ const getDeepResearchBaseUrl = (): string => {
   return isBrowser ? '/api/jobs/async' : `${apiConfig.baseUrl}/v1/jobs/async`
 }
 
+const RETRYABLE_JOB_STATUS_CODES = new Set([500, 502, 503, 504])
+
 /** Get job status */
 export const getJobStatus = async (
   jobId: string,
@@ -769,13 +795,25 @@ export const getJobStatus = async (
     headers['Authorization'] = `Bearer ${authToken}`
   }
 
-  const response = await fetch(url, { headers })
+  // Refresh-time reconnects can briefly see proxy/backend 5xx responses
+  // even when the job is still healthy. Retry those idempotent status
+  // lookups once before surfacing an error to the UI.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const response = await fetch(url, {
+      headers,
+      cache: 'no-store',
+    })
 
-  if (!response.ok) {
-    throw new Error(`Failed to get job status: ${response.status}`)
+    if (response.ok) {
+      return response.json()
+    }
+
+    if (!RETRYABLE_JOB_STATUS_CODES.has(response.status) || attempt === 1) {
+      throw new Error(`Failed to get job status: ${response.status}`)
+    }
   }
 
-  return response.json()
+  throw new Error('Failed to get job status: 500')
 }
 
 /** Get job report */

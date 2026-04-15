@@ -12,7 +12,7 @@
 'use client'
 
 import { type FC, useCallback, useMemo, useRef, useState } from 'react'
-import { Flex, Text, Button, Banner } from '@/adapters/ui'
+import { Flex, Text, Button, Banner, SegmentedControl } from '@/adapters/ui'
 import { LoadingSpinner } from '@/adapters/ui/icons'
 import { FileSourceCard } from './FileSourceCard'
 import { DeleteFileConfirmationModal } from './DeleteFileConfirmationModal'
@@ -50,6 +50,7 @@ const triggerBrowserDownload = (file: File): void => {
  * Connected to the file upload store for real-time updates.
  */
 export const FileSourcesTab: FC<FileSourcesTabProps> = ({ onDeleteFile }) => {
+  const [sortOrder, setSortOrder] = useState<'newest' | 'oldest' | 'alphabetical'>('newest')
   // Get current conversation and ensureSession for session management
   const currentConversation = useChatStore((state) => state.currentConversation)
   const ensureSession = useChatStore((state) => state.ensureSession)
@@ -69,11 +70,11 @@ export const FileSourcesTab: FC<FileSourcesTabProps> = ({ onDeleteFile }) => {
   const emptyStateHeading = isProjectScope ? 'No Project Files' : 'No Chat Files'
   const filesHeading = isProjectScope ? 'Project Files' : 'Chat Files'
   const emptyStateCopy = isProjectScope
-    ? `Files uploaded to "${projectTitle}" will be shared across sessions and remain accessible to agents until removed.`
-    : 'Files uploaded to this standalone chat stay available only in this chat and are not reused by projects or other chats.'
+    ? `Files uploaded to "${projectTitle}" will be shared across chats and remain accessible to agents until removed.`
+    : 'Files uploaded to this chat stay available only in this chat and are not reused by projects or other chats.'
   const filesScopeCopy = isProjectScope
-    ? `Shared across every session in "${projectTitle}".`
-    : 'Used only in this standalone chat.'
+    ? `Shared across every chat in "${projectTitle}".`
+    : 'Used only in this chat.'
 
   // Check if file uploads are available (knowledge layer)
   const knowledgeLayerAvailable = useLayoutStore((state) => state.knowledgeLayerAvailable)
@@ -332,6 +333,25 @@ export const FileSourcesTab: FC<FileSourcesTabProps> = ({ onDeleteFile }) => {
     }
   }, [currentCollectionName, documentsClient, previewFile, sessionFiles])
 
+  const sortedSessionFiles = useMemo(() => {
+    const files = [...sessionFiles]
+    switch (sortOrder) {
+      case 'alphabetical':
+        return files.sort((left, right) => left.fileName.localeCompare(right.fileName))
+      case 'oldest':
+        return files.sort(
+          (left, right) =>
+            new Date(left.uploadedAt ?? 0).getTime() - new Date(right.uploadedAt ?? 0).getTime()
+        )
+      case 'newest':
+      default:
+        return files.sort(
+          (left, right) =>
+            new Date(right.uploadedAt ?? 0).getTime() - new Date(left.uploadedAt ?? 0).getTime()
+        )
+    }
+  }, [sessionFiles, sortOrder])
+
   if (sessionFiles.length === 0) {
     // When files are expected (loading, uploading, or session known to have files),
     // always show the spinner — never flash "No Files" during transitions.
@@ -408,14 +428,26 @@ export const FileSourcesTab: FC<FileSourcesTabProps> = ({ onDeleteFile }) => {
       )}
 
       {/* Header with count and add button */}
-      <Flex align="center" justify="between" className="mb-1">
-        <Flex direction="col" gap="1">
+      <Flex align="start" justify="between" gap="3" className="mb-1">
+        <Flex direction="col" gap="2" className="min-w-0 flex-1">
           <Text kind="label/semibold/xs" className="text-subtle uppercase">
             {filesHeading} ({sessionFiles.length})
           </Text>
           <Text kind="body/regular/xs" className="text-subtle">
             {filesScopeCopy}
           </Text>
+          <SegmentedControl
+            value={sortOrder}
+            onValueChange={(value) =>
+              setSortOrder(value as 'newest' | 'oldest' | 'alphabetical')
+            }
+            size="small"
+            items={[
+              { value: 'newest', children: 'Newest' },
+              { value: 'oldest', children: 'Oldest' },
+              { value: 'alphabetical', children: 'A-Z' },
+            ]}
+          />
         </Flex>
         <Button
           kind="tertiary"
@@ -429,7 +461,7 @@ export const FileSourcesTab: FC<FileSourcesTabProps> = ({ onDeleteFile }) => {
       </Flex>
 
       {/* File list */}
-      {sessionFiles.map((file) => (
+      {sortedSessionFiles.map((file) => (
         <FileSourceCard
           key={file.id}
           id={file.id}

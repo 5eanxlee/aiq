@@ -1,0 +1,129 @@
+general:
+  use_uvloop: true
+  telemetry:
+    logging:
+      console:
+        _type: console
+        level: INFO
+  front_end:
+    _type: aiq_api
+    runner_class: aiq_api.plugin.AIQAPIWorker
+    db_url: ${NAT_JOB_STORE_DB_URL:-sqlite+aiosqlite:///./var/jobs.db}
+    expiry_seconds: 86400
+    cors:
+      allow_origin_regex: http://localhost(:\d+)?|http://127.0.0.1(:\d+)?
+      allow_methods:
+        - GET
+        - POST
+        - DELETE
+        - OPTIONS
+      allow_headers:
+        - "*"
+      allow_credentials: true
+      expose_headers:
+        - "*"
+llms:
+  nemotron_llm_intent:
+    _type: nim
+    model_name: nvidia/nemotron-3-nano-30b-a3b
+    base_url: https://integrate.api.nvidia.com/v1
+    temperature: 0.5
+    top_p: 0.9
+    max_tokens: 4096
+    num_retries: 5
+    chat_template_kwargs:
+      enable_thinking: true
+  nemotron_ultra_llm:
+    _type: nim
+    model_name: nvidia/llama-3.1-nemotron-ultra-253b-v1
+    base_url: https://integrate.api.nvidia.com/v1
+    temperature: 0.3
+    top_p: 0.9
+    max_tokens: 120000
+    num_retries: 5
+    chat_template_kwargs:
+      enable_thinking: true
+  openai_gpt_5_4:
+    _type: openai
+    model_name: gpt-5.4
+    api_key: ${OPENAI_API_KEY}
+    api_type: responses
+    reasoning_effort: xhigh
+  summary_llm:
+    _type: nim
+    model_name: nvidia/nemotron-mini-4b-instruct
+    base_url: https://integrate.api.nvidia.com/v1
+    api_key: ${NVIDIA_API_KEY}
+    temperature: 0.3
+    max_tokens: 100
+functions:
+  web_search_tool:
+    _type: tavily_web_search
+    max_results: 5
+    max_content_length: 1000
+  advanced_web_search_tool:
+    _type: tavily_web_search
+    max_results: 4
+    max_content_length: 1500
+    advanced_search: true
+  knowledge_search:
+    _type: knowledge_retrieval
+    backend: llamaindex
+    collection_name: ${COLLECTION_NAME:-test_collection}
+    generate_summary: true
+    summary_model: summary_llm
+    summary_db: ${AIQ_SUMMARY_DB:-sqlite+aiosqlite:///./var/summaries.db}
+    top_k: 4
+    chroma_dir: ${AIQ_CHROMA_DIR:-/tmp/chroma_data}
+  paper_search_tool:
+    _type: paper_search
+    max_results: 8
+    serper_api_key: ${SERPER_API_KEY}
+  intent_classifier:
+    _type: intent_classifier
+    llm: nemotron_llm_intent
+    verbose: true
+    tools:
+      - web_search_tool
+      - paper_search_tool
+      - knowledge_search
+  clarifier_agent:
+    _type: clarifier_agent
+    llm: openai_gpt_5_4
+    planner_llm: openai_gpt_5_4
+    tools:
+      - web_search_tool
+      - knowledge_search
+    max_turns: 3
+    enable_plan_approval: true
+    log_response_max_chars: 2000
+    verbose: true
+  shallow_research_agent:
+    _type: shallow_research_agent
+    llm: nemotron_ultra_llm
+    verbose: true
+    tools:
+      - web_search_tool
+      - knowledge_search
+    max_llm_turns: 10
+    max_tool_iterations: 5
+  deep_research_agent:
+    _type: deep_research_agent
+    orchestrator_llm: openai_gpt_5_4
+    researcher_llm: nemotron_ultra_llm
+    planner_llm: openai_gpt_5_4
+    max_loops: 2
+    verbose: true
+    tools:
+      - paper_search_tool
+      - advanced_web_search_tool
+      - knowledge_search
+    min_total_sources_retrieved: 500
+    min_total_cited_sources: 48
+workflow:
+  _type: chat_deepresearcher_agent
+  verbose: true
+  enable_escalation: true
+  enable_clarifier: true
+  use_async_deep_research: true
+  checkpoint_db: ${AIQ_CHECKPOINT_DB:-./var/checkpoints.db}

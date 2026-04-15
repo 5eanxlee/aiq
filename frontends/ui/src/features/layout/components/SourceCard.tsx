@@ -16,6 +16,7 @@
 
 import { type FC } from 'react'
 import { Flex, Text } from '@/adapters/ui'
+import { buildCitationDisplayLabel, getCitationDomain } from '@/features/chat/lib/citation-formatting'
 
 /** Source information from SSE events */
 export interface SourceInfo {
@@ -47,21 +48,16 @@ const formatTime = (date: Date | string): string => {
 }
 
 /**
- * Extract domain from URL for display
- */
-const getDomain = (url: string): string => {
-  try {
-    const urlObj = new URL(url)
-    return urlObj.hostname.replace('www.', '')
-  } catch {
-    return url
-  }
-}
-
-/**
  * Card showing a source URL with metadata.
  */
 export const SourceCard: FC<SourceCardProps> = ({ source }) => {
+  const domain = getCitationDomain(source.url)
+  const displayLabel = buildCitationDisplayLabel({
+    url: source.url,
+    title: source.title,
+    domain,
+  })
+
   return (
     <a
       href={source.url}
@@ -89,7 +85,7 @@ export const SourceCard: FC<SourceCardProps> = ({ source }) => {
 
           {/* Title or domain */}
           <Text kind="label/semibold/sm" className="flex-1 truncate">
-            {source.title || getDomain(source.url)}
+            {displayLabel}
           </Text>
 
           {/* Timestamp */}
@@ -102,7 +98,7 @@ export const SourceCard: FC<SourceCardProps> = ({ source }) => {
 
         {/* URL */}
         <Text kind="body/regular/xs" className="text-subtle truncate">
-          {source.url}
+          {domain}
         </Text>
 
         {/* Snippet */}

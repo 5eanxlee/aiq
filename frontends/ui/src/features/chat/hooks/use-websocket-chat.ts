@@ -40,6 +40,7 @@ import { useAuth } from '@/adapters/auth'
 import { useProjectsStore } from '@/features/projects'
 import { isLikelyAuthRelatedTransportError } from '../lib/transport-auth-signals'
 import { resolveKnowledgeCollectionName } from '../lib/resolve-knowledge-collection'
+import { shouldUseKnowledgeLayer } from '../lib/should-use-knowledge-layer'
 import type {
   Conversation,
   PromptType,
@@ -345,8 +346,10 @@ export const useWebSocketChat = (options: UseWebSocketChatOptions = {}): UseWebS
           )
           // Start deep research SSE streaming bound to this message
           startDeepResearch(jobId, messageId)
-          // Keep isStreaming=true to block input - deep research will release it on completion
+          // Release the WebSocket lane immediately after the async handoff so
+          // another tab/session can continue using chat while deep research runs.
           setLoading(false)
+          setStreaming(false)
           // Don't add this as final response - let SSE handle the rest
           return
         }
@@ -629,7 +632,7 @@ export const useWebSocketChat = (options: UseWebSocketChatOptions = {}): UseWebS
 
       const ensuredSessionId = ensureSession()
       if (!ensuredSessionId) {
-        addErrorCard('system.unknown', 'No active project')
+        addErrorCard('system.unknown', 'No active chat')
         return
       }
 
@@ -688,11 +691,17 @@ export const useWebSocketChat = (options: UseWebSocketChatOptions = {}): UseWebS
         : []
 
       const hasSessionFiles = sessionFiles.length > 0
+      const fileNames = sessionFiles.map((f) => f.fileName)
+      const shouldIncludeKnowledgeLayer =
+        hasSessionFiles &&
+        layoutState.knowledgeLayerAvailable &&
+        shouldUseKnowledgeLayer(content, fileNames)
 
-      // Add knowledge_layer to data sources if files exist
+      // Only add knowledge_layer when the user is explicitly asking about uploaded files
+      // or naming a project document. Otherwise, document summaries stay supplemental.
       const dataSourcesForMessage =
-        hasSessionFiles && layoutState.knowledgeLayerAvailable
-          ? [...enabledDataSources, 'knowledge_layer']
+        shouldIncludeKnowledgeLayer
+          ? [...new Set([...enabledDataSources, 'knowledge_layer'])]
           : enabledDataSources
 
       // Prepare file metadata for display

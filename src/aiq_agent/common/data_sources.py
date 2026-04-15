@@ -139,6 +139,11 @@ def format_data_source_tools(data_sources: list[str]) -> list[dict[str, str]]:
                 }
             )
         else:
-            tools_info.append({"name": "knowledge_search", "description": "Search uploaded documents and files."})
+            tools_info.append(
+                {
+                    "name": "knowledge_search",
+                    "description": "Consult uploaded documents and files for private or project-specific context.",
+                }
+            )
 
     return tools_info

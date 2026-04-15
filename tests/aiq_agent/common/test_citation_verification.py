@@ -71,6 +71,12 @@ class TestNormalizeUrl:
         url2 = "https://example.com/article?id=42"
         assert _normalize_url(url1) == _normalize_url(url2)
 
+    def test_strips_escaped_newline_suffix_noise(self):
+        assert (
+            _normalize_url("https://example.com/article\\n\\n4")
+            == "https://example.com/article"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Citation key parsing tests
@@ -372,6 +378,12 @@ class TestGenericUrlExtractor:
         content = "See https://example.com/page and also https://example.com/page for reference."
         entries = extract_sources_from_tool_result("any_tool", content)
         assert len(entries) == 1
+
+    def test_escaped_newline_suffix_is_not_treated_as_part_of_url(self):
+        content = "Source: https://example.com/report\\n\\n4"
+        entries = extract_sources_from_tool_result("paper_search_tool", content)
+        assert len(entries) == 1
+        assert entries[0].url == "https://example.com/report"
 
     def test_multiple_urls_in_same_block_get_correct_titles(self):
         """Each URL should get the title closest to it, not the first title in the block."""

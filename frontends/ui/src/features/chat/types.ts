@@ -272,6 +272,9 @@ export interface CitationSource {
   url: string
   content: string
   timestamp: Date
+  title?: string
+  domain?: string
+  displayLabel?: string
   /** Whether this source was actually cited in the report (vs just referenced/discovered) */
   isCited?: boolean
 }
@@ -621,7 +624,12 @@ export interface ChatActions {
   /** Clean up orphaned 'starting' banners by polling job status via REST */
   cleanupOrphanedStartingBanners: () => Promise<void>
   /** Add a citation from deep research (isCited=true for citation_use, false for citation_source) */
-  addDeepResearchCitation: (url: string, content: string, isCited?: boolean) => void
+  addDeepResearchCitation: (
+    url: string,
+    content: string,
+    isCited?: boolean,
+    metadata?: { title?: string; domain?: string; displayLabel?: string }
+  ) => void
   /** Set the full todo list from deep research (replaces existing) */
   setDeepResearchTodos: (todos: Array<{ content: string; status: string }>) => void
   /** Mark all in-progress and pending todos as stopped (on error) */

@@ -158,6 +158,8 @@ describe('createProviderStatusClient', () => {
           knowledge_layer_enabled: true,
           generate_summary: true,
           top_k: 9,
+          min_total_sources_retrieved: 0,
+          min_total_cited_sources: 0,
           notes: ['Top K applies after reload.'],
         }),
     })
@@ -166,6 +168,7 @@ describe('createProviderStatusClient', () => {
     const result = await client.getLocalResearchOptions()
 
     expect(result.top_k).toBe(9)
+    expect(result.min_total_sources_retrieved).toBe(0)
     expect(mockFetch).toHaveBeenCalledWith('/api/local-stack/research-options', {
       method: 'GET',
       headers: { 'Content-Type': 'application/json' },
@@ -192,6 +195,8 @@ describe('createProviderStatusClient', () => {
       knowledge_layer_enabled: true,
       generate_summary: false,
       top_k: 7,
+      min_total_sources_retrieved: 120,
+      min_total_cited_sources: 12,
     })
 
     expect(result.accepted).toBe(true)
@@ -202,7 +207,70 @@ describe('createProviderStatusClient', () => {
         knowledge_layer_enabled: true,
         generate_summary: false,
         top_k: 7,
+        min_total_sources_retrieved: 120,
+        min_total_cited_sources: 12,
       }),
+      signal: undefined,
+    })
+  })
+
+  test('reads local Tavily API key status successfully', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          local_stack_running: true,
+          can_edit: true,
+          requires_reload: true,
+          env_path: 'deploy/.env',
+          configured: true,
+          key_hint: '••••abcd',
+          notes: ['Saving a new Tavily key reloads the local backend.'],
+        }),
+    })
+
+    const client = createProviderStatusClient()
+    const result = await client.getLocalTavilyApiKeyStatus()
+
+    expect(result.configured).toBe(true)
+    expect(mockFetch).toHaveBeenCalledWith('/api/local-stack/tavily-api-key', {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+      signal: undefined,
+    })
+  })
+
+  test('updates the local Tavily API key successfully', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          accepted: true,
+          message: 'Tavily API key saved.',
+          config_path: 'configs/config_preset_current_setup.yml',
+          backend_url: 'http://localhost:8000',
+          frontend_url: 'http://localhost:3005',
+          operation_id: 'reload-op-3',
+          status: {
+            local_stack_running: true,
+            can_edit: true,
+            requires_reload: true,
+            env_path: 'deploy/.env',
+            configured: true,
+            key_hint: '••••abcd',
+            notes: ['Saving a new Tavily key reloads the local backend.'],
+          },
+        }),
+    })
+
+    const client = createProviderStatusClient()
+    const result = await client.updateLocalTavilyApiKey({ api_key: 'tvly-test-key' })
+
+    expect(result.accepted).toBe(true)
+    expect(mockFetch).toHaveBeenCalledWith('/api/local-stack/tavily-api-key', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: 'tvly-test-key' }),
       signal: undefined,
     })
   })
